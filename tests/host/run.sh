@@ -7,6 +7,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${1:-${RUNNER_TEMP:-/tmp}/host-tests}"
 mkdir -p "$OUT"
+# Interpreter address-space policy and the fatal startup line from the Forager device log.
+cc -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pthread \
+    -I"$ROOT/App/Sources/Native" "$ROOT/App/Sources/Native/wine_startup.c" \
+    "$HERE/wine_startup/main.c" -o "$OUT/wine-startup-tests"
+"$OUT/wine-startup-tests" | tee "$OUT/wine-startup-tests.txt"
 swiftc --version | head -1
 # Steam Cloud saves: path mapping, comparison, sync decisions, backup retention.
 swiftc -O -o "$OUT/steam-cloud-tests" "$ROOT/App/Sources/Steam/SteamCloudCore.swift" "$HERE/steam_cloud/main.swift"

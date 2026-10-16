@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "wine_host.h"
+#include "wine_startup.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +27,10 @@ static void *stdio_reader(void *arg) {
         for (ssize_t i = 0; i < n; i++) {
             if (buf[i] == '\n' || used == sizeof line - 1) {
                 line[used] = 0;
-                if (used) mid_log("[stdio] %s", line);
+                if (used) {
+                    mid_wine_observe_startup_log(line);
+                    mid_log("[stdio] %s", line);
+                }
                 used = 0;
             } else {
                 line[used++] = buf[i];
@@ -82,7 +86,10 @@ static void *wine_log_follower(void *arg) {
         for (ssize_t i = 0; i < n; i++) {
             if (buf[i] == '\n' || used == sizeof line - 1) {
                 line[used] = 0;
-                if (used) mid_log("[winelog] %s", line);
+                if (used) {
+                    mid_wine_observe_startup_log(line);
+                    mid_log("[winelog] %s", line);
+                }
                 used = 0;
             } else {
                 line[used++] = buf[i];
@@ -267,8 +274,12 @@ static void exit_report(void) {
 }
 
 bool mid_wine_boot(const char *prefix, const char *exe, const char *args, char *err, size_t errlen) {
+    if (mid_wine_startup_error(err, errlen)) return false;
     if (g_booted) return boot_next(prefix, exe, args, err, errlen);
     setenv("WINE_IOS_NOJIT", "1", 1);
+    mid_wine_configure_address_space();
+    mid_log("[wine] interpreter address-space policy: 4 GiB guest window, %s GiB free VA headroom",
+            getenv("DANPORT_WOW_MIN_FREE_GB"));
     char buf[32];
     uint64_t wb, ws;
     if (mid_exe_window(&wb, &ws)) {

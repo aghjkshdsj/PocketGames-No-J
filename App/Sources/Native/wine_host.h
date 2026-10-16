@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Stage 2 host side for Wine (DanPort's iOS port): hands Wine a slice of
-// PocketGamesNoJ's JIT pool and starts wineserver + the Windows process in-process.
+// Host side for Wine (DanPort's iOS port): starts wineserver and the Windows
+// process in-process, using signed libraries and the built-in interpreters.
 
 #ifndef PocketGamesNoJ_WINE_HOST_H
 #define PocketGamesNoJ_WINE_HOST_H
@@ -18,7 +18,7 @@ bool mid_wine_linked(void);
 
 /// Boot Wine with `prefix` (created from the bundled template on first use)
 /// and run `exe` (a path inside the prefix, e.g. "C:\\windows\\system32\\cmd.exe",
-/// or a bare name looked up in system32). Requires the JIT pool. Wine can only
+/// or a bare name looked up in system32). Wine can only
 /// be started once per app run; with PocketGamesNoJ_SESSION_REUSE=1 a later call starts `exe` in
 /// the running session instead, once mid_wine_session_reusable() (docs/SESSION_REUSE.md).
 /// Returns false and fills err on failure.
@@ -38,6 +38,10 @@ void mid_wine_seed_prefix(const char *prefix);
 
 /// 1 while the Windows process runs.
 int mid_wine_running(void);
+
+/// A fatal asynchronous startup failure, including failures that leave the
+/// bridge's running flag set. Fills err when provided; latched until app restart.
+int mid_wine_startup_error(char *err, size_t errlen);
 
 /// 1 and the NTSTATUS when the program ended with an error (0xC...).
 int wine_crash_exit_status(uint32_t *status);

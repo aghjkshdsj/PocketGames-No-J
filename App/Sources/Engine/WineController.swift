@@ -186,6 +186,10 @@ final class WineController: ObservableObject, @unchecked Sendable {
     /// Why another game cannot start now (nil: it can, as far as is known without the game;
     /// `kind` adds the game's own checks).
     func nextGameRefusal(_ kind: SessionKind? = nil) -> String? {
+        var startupError = [CChar](repeating: 0, count: 512)
+        if mid_wine_startup_error(&startupError, startupError.count) != 0 {
+            return String(cString: startupError)
+        }
         let restart = "To play another, swipe PocketGames No J away in the app switcher and open it again."
         guard Self.reuseEnabled else {
             return "PocketGames No J runs one Windows game per launch. \(restart) (Settings › Interpreter › Play another game without restarting lets the next game start without that.)"
@@ -522,7 +526,8 @@ final class WineController: ObservableObject, @unchecked Sendable {
     private func watch(_ title: String) {
         let started = Date()
         var ticks = 0, clientLogsDumped = false
-        while mid_wine_running() != 0 {
+        var startupError = [CChar](repeating: 0, count: 512)
+        while mid_wine_running() != 0 && mid_wine_startup_error(&startupError, startupError.count) == 0 {
             usleep(250_000)
             ticks += 1
             // Steam Dock: log the host's report fields as they change ([dock-report]), and
@@ -538,6 +543,16 @@ final class WineController: ObservableObject, @unchecked Sendable {
                     if dumpLogs { SteamDock.logClientLogs() }
                 }
             }
+        }
+        if mid_wine_startup_error(&startupError, startupError.count) != 0 {
+            let why = String(cString: startupError)
+            dlog("[wine] \(title) failed during startup: \(why)")
+            DispatchQueue.main.async {
+                self.sessionKept = false
+                GameHostView.shared.setStatus(nil)
+                self.state = .failed(why)
+            }
+            return
         }
         if dockActive { Task { @MainActor in GameHostView.shared.setStatus(nil) } }
         if dockActive {
