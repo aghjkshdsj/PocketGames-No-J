@@ -1,0 +1,28 @@
+PocketGames No J — Privacy policy
+Last updated: October 16, 2026
+Maintainer: Dan
+
+Local use
+PocketGames No J stores settings, imported game files, downloaded games, save files, backups and diagnostic logs on your device. The project does not operate a server to receive these files. This version includes no advertising or analytics service operated by the project. Device backups and transfers are subject to your Apple and device settings.
+
+Steam is optional
+You can use supported imported games without signing in to Steam. When you choose Steam features, the app communicates with Valve and its content delivery providers to authenticate, retrieve your owned library and game metadata, download game files and artwork, and synchronize saves. Those providers receive the network requests, including your IP address. Steam authentication uses your account information and Steam Guard or QR authorization. Valve processes these communications under its own terms and privacy policy.
+
+The app does not save your Steam password. It keeps Steam account information and authentication tokens in this device's Keychain, accessible while the device is unlocked. Starting a game with Steam passes the credentials needed by Valve's client into the local Steam runtime. Use Settings > Steam > Sign out to remove the app's stored sign-in tokens. Signing out does not delete downloaded games, local saves, backups or data held by Valve. Keychain items can survive deleting an app, so sign out before removing it.
+
+Steam Cloud
+When Steam Cloud saves are enabled, the app downloads saves before starting a Steam game and uploads changed saves when the game ends. These files and the information needed to associate them with your Steam account are sent to Valve and its storage providers. Turn Steam Cloud saves off in Settings > Steam to stop the app's save synchronization. Local save backups remain on your device. Manage data held by Steam through Valve's account and privacy tools. Turning off this app's synchronization does not control network features inside a running game or Valve's client.
+
+Games and connections
+Imported and downloaded games run on your device. Games and Valve's client may communicate with their publishers' services using the app's network connection. Their handling of account information, saves and other content depends on those services. Only run games and files you trust and have permission to use.
+
+Diagnostics and sharing
+Diagnostic logs are stored locally. The app does not automatically upload them to the project. If you choose Share, the destination you select receives the shared file under its own privacy practices. Logs can contain game names, file paths, account identifiers and details of your device or session. Review and remove personal information before sharing, especially in a public issue. Reports you choose to send to the maintainer are used to investigate and respond; do not include passwords or tokens.
+
+Removing data
+You can remove games through the app's storage controls and manage accessible files and save backups in Files > On My iPhone > PocketGames No J. Deleting the app removes its local app data, subject to device backups and Keychain behavior. Copies you exported or shared and data stored by Valve or other game services must be managed separately with their holders. This app does not create a separate PocketGames account.
+
+Questions and updates
+The current policy and project support are available at:
+https://github.com/aghjkshdsj/PocketGames-No-J
+For a privacy question, open a project issue without including private information. If confidential contact is needed, request a private contact method before sending details. Changes to this policy are published with the project and updated app. Before an App Store release, the publishing identity, support contact and App Store privacy disclosures must be checked against the submitted version.

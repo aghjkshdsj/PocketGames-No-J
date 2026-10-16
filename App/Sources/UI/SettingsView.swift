@@ -364,6 +364,7 @@ private struct AboutSettings: View {
                     .font(.footnote).foregroundStyle(Deck.dim)
             }
             GlassCard {
+                navRow("Privacy", detail: "Steam, saves, local data and diagnostic logs", icon: "hand.raised") { ui.open(.privacy) }
                 navRow("Open Source Licenses", detail: "Copyright notices, license texts and source code", icon: "doc.text") { ui.open(.licenses) }
                 navRow("Logs", detail: "Share pocketgamesnoj-log.txt when something goes wrong", icon: "text.alignleft") { ui.open(.logs) }
                 navRow("Benchmarks", detail: "CPU, GPU and interpreter tests", icon: "speedometer") { ui.open(.benchmarks) }

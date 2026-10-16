@@ -37,6 +37,26 @@ and the immutable retrieval URLs for review and independent comparison.
 
 ## Required macOS rebuild demonstration
 
+### Automated first replacement test
+
+Dispatch `build-ipa.yml` on the candidate app revision with `lgpl_validation`
+set to true. Supply `runtime_revision` only when its inputs pass the existing
+runtime-equality guard. The workflow first validates the normal runtime inputs,
+then rebuilds the exact locked GMP, Nettle and GnuTLS sources on macOS for iOS.
+The one-line GnuTLS diagnostic changes no cryptographic settings or results.
+`tools/lgpl_relink_validation.py` requires the marker in both the replacement
+archive and the complete linked application, and records original/replacement
+hashes, the source patch, build configuration, application source and link
+materials. The `lgpl-relink-validation` artifact also contains build logs.
+
+The validation IPA has a distinct filename and does not create a GitHub release.
+Download its evidence before the CI retention period expires. This is a build/
+relink demonstration for one library, not proof of runtime execution, usable
+independent reconstruction of all dependencies, or full LGPL compliance. Install
+it with legitimate tester credentials and record game/Steam tests separately.
+
+### Full release demonstration still required
+
 1. Use a clean Apple-silicon macOS environment and record Xcode, SDK, deployment
    target, clang, Python, CMake, Ninja, Bison/Flex, MinGW and LLVM versions.
 2. Reconstruct the source layout specified by `engine/wine/PIN`,

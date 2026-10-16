@@ -3,6 +3,10 @@ name: Build IPA
 on:
   workflow_dispatch:
     inputs:
+      lgpl_validation:
+        description: Test a modified LGPL library in a separate IPA (no release publication)
+        type: boolean
+        default: false
       runtime_revision:
         description: Optional full commit SHA for runtimes with identical build inputs
         type: string
@@ -122,6 +126,21 @@ jobs:
           gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n wine-unix-libs -D engine/wine/out
           GITHUB_SHA="$RUNTIME_SOURCE_SHA" python3 tools/artifact_manifest.py check engine/wine/out wine-unix
           bash engine/wine/stage-app.sh
+
+      - name: Rebuild LGPL crypto stack with a harmless GnuTLS witness
+        if: inputs.lgpl_validation
+        run: |
+          python3 tools/lgpl_relink_validation.py prepare --revision "$GITHUB_SHA"
+          {
+            xcodebuild -version
+            xcrun --sdk iphoneos --show-sdk-version
+            xcrun clang --version
+            python3 --version
+            make --version | head -1
+            sw_vers
+          } > build/lgpl-validation/toolchain.txt
+          bash engine/wine/danport/build/gnutls-ios/build.sh > build/lgpl-validation/rebuild.log 2>&1
+          python3 tools/lgpl_relink_validation.py stage
 
       - name: Audit Wine DLLs for the no-JIT scheme (signed dylibs)
         if: steps.wine.outcome == 'success'
@@ -254,6 +273,15 @@ jobs:
       - name: Verify complete game bundle
         run: python3 tools/validate_runtime.py build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
 
+      - name: Prove modified LGPL library reached the linked application
+        if: inputs.lgpl_validation
+        run: |
+          python3 tools/lgpl_relink_validation.py verify --app build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
+
+      - name: Record App Store structural audit (sideload packaging is not cleared for submission)
+        run: |
+          python3 tools/audit_app_store.py --app build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app --output build/app-store-audit.json
+
       - name: Package IPA
         id: pkg
         run: |
@@ -277,6 +305,7 @@ jobs:
           [ "${{ steps.wine.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}wine"
           [ "${{ steps.dxmt.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}dxmt"
           [ -n "$FLAVOR" ] || FLAVOR=uionly
+          [ "${{ inputs.lgpl_validation }}" != true ] || FLAVOR="$FLAVOR-lgpl-validation"
           NAME="PocketGamesNoJ-0.1.0-build${{ github.run_number }}-${FLAVOR}.ipa"
           zip -qry "$NAME" Payload
           ls -la "$NAME"
@@ -315,10 +344,23 @@ jobs:
           path: |
             build/xcodebuild.log
             build/pe-audit.json
+            build/app-store-audit.json
           if-no-files-found: ignore
 
+      - name: Preserve modified-library rebuild and relink evidence
+        if: always() && inputs.lgpl_validation
+        uses: actions/upload-artifact@v5
+        with:
+          name: lgpl-relink-validation
+          path: |
+            build/lgpl-validation
+            build/xcodebuild.log
+            engine/wine/danport/build/gnutls-ios/obj/*.log
+          retention-days: 30
+          if-no-files-found: error
+
       - name: Publish release
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !inputs.lgpl_validation
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

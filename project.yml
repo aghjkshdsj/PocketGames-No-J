@@ -71,6 +71,10 @@ targets:
       - path: App/Resources/Legal
         type: folder
         buildPhase: resources
+      - path: App/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: App/Resources/PrivacyPolicy.txt
+        buildPhase: resources
       - path: App/Info.plist
         buildPhase: none
       - path: App/PocketGamesNoJ.entitlements

@@ -51,6 +51,7 @@ private struct RouteView: View {
         case .benchmarks: GlassPage(back: "Settings", title: "Benchmarks", scrolls: false) { PerformanceView() }
         case .developer: GlassPage(back: "About", title: "Test programs") { DeveloperView() }
         case .licenses: GlassPage(back: "About", title: "Open Source Licenses") { LegalNoticesView() }
+        case .privacy: GlassPage(back: "About", title: "Privacy") { PrivacyView() }
         case .licenseDocument(let id): GlassPage(back: "Licenses", title: "License Notice") { LegalDocumentView(documentID: id) }
         }
     }
