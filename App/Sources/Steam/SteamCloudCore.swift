@@ -271,6 +271,20 @@ struct SteamCloudAudit: Equatable, Sendable {
     }
 }
 
+/// Explicit Download fetches every mapped cloud file, including files the
+/// comparison found identical. Automatic synchronization still uses its normal
+/// change/conflict plan and does not repeatedly fetch matching files.
+enum SteamCloudManualSelection {
+    static func entries(_ entries: [SteamCloudEntry], upload: Bool) -> [SteamCloudEntry] {
+        entries.filter { entry in
+            if upload {
+                return (entry.kind == .differ || entry.kind == .localOnly) && !entry.localSHA.isEmpty
+            }
+            return entry.kind == .same || entry.kind == .differ || entry.kind == .cloudOnly
+        }
+    }
+}
+
 // MARK: - The record of the last sync
 
 /// What PocketGamesNoJ knows about one game's saves since its last sync with Steam Cloud. Kept per

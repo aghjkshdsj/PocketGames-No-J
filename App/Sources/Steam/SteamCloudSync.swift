@@ -746,7 +746,9 @@ final class SteamCloudSync: ObservableObject {
         var fetched: [(entry: SteamCloudEntry, url: URL, data: Data)] = []
         var total = 0
         for entry in wanted {
-            guard let url = context.paths.url(cloudPath: entry.path) else { continue }
+            guard let url = context.paths.url(cloudPath: entry.path) else {
+                throw SteamFileError.invalid("A selected cloud save has no supported destination. No saves were replaced.")
+            }
             let data = try await cloudFile(appID, entry)
             total += data.count
             guard total <= 1 << 30 else { throw SteamFileError.invalid("This game's Steam Cloud saves are too large to download.") }
@@ -1083,8 +1085,8 @@ final class SteamCloudSync: ObservableObject {
 
     // MARK: Upload or download on request
 
-    /// What a manual upload or download would copy, for the confirmation: every save that differs
-    /// in that direction, and which of them replace a copy that changed since the last sync.
+    /// What an explicit transfer would copy. Downloads include already identical
+    /// cloud files, allowing a fresh fetch rather than treating Download as Sync.
     struct ManualTransfer: Identifiable {
         var appID: Int
         var upload: Bool
@@ -1098,42 +1100,44 @@ final class SteamCloudSync: ObservableObject {
     /// Compares and lists what Upload (this iPhone's saves into the cloud) or Download (the cloud's
     /// saves onto this iPhone) would copy. Changes nothing.
     func prepareManual(_ appID: Int, upload: Bool) async -> Result<ManualTransfer, SteamFileError> {
+        let verb = upload ? "upload" : "download"
+        SteamLog.event("[steam-cloud] app=\(appID) manual \(verb) requested")
         guard Self.enabled, account != nil else { return .failure(.invalid("Sign in to Steam to use Steam Cloud.")) }
         guard !dockRunning, activeApp != appID, !busy.contains(appID) else {
             return .failure(.invalid("Wait until the game and its sync have ended."))
         }
         busy.insert(appID); defer { busy.remove(appID) }
         setPhase(appID, .checking)
+        var stage = "context"
         do {
             let context = try await context(appID, online: true)
+            stage = "comparison"
             let (_, audit, _) = try await compare(appID, context)
             setPhase(appID, .idle)
             let r = record(appID)
-            var entries: [SteamCloudEntry] = []
+            let entries = SteamCloudManualSelection.entries(audit.entries, upload: upload)
             var newer = Set<String>()
-            for e in audit.entries {
+            for e in entries {
                 let known = r.files[e.key].flatMap { $0.state == .synced ? $0.sha : nil }
                 if upload {
-                    guard (e.kind == .differ || e.kind == .localOnly), !e.localSHA.isEmpty else { continue }
-                    entries.append(e)
                     if e.kind == .differ, known != SteamCloudRecord.hex(e.cloudSHA) { newer.insert(e.key) }
                 } else {
-                    guard e.kind == .differ || e.kind == .cloudOnly else { continue }
-                    entries.append(e)
                     if e.kind == .differ, known != SteamCloudRecord.hex(e.localSHA) { newer.insert(e.key) }
                 }
             }
-            SteamLog.event("[steam-cloud] app=\(appID) manual \(upload ? "upload" : "download") prepared files=\(entries.count) replacing-newer=\(newer.count)")
+            SteamLog.event("[steam-cloud] app=\(appID) manual \(verb) prepared files=\(entries.count) already-matching=\(entries.filter { $0.kind == .same }.count) replacing-newer=\(newer.count)")
             return .success(ManualTransfer(appID: appID, upload: upload, entries: entries, replacesNewer: newer))
         } catch {
             setPhase(appID, .failed(SteamSignIn.message(error)))
+            SteamLog.event("[steam-cloud] app=\(appID) manual \(verb) prepare failed stage=\(stage) reason=\(SteamSignIn.reason(error))")
             return .failure(.invalid(SteamSignIn.message(error)))
         }
     }
 
     /// Runs a confirmed manual transfer. The saves must still be as the confirmation showed them;
     /// the copies they replace are backed up first (save-backups), nothing is deleted on either side,
-    /// and the usual sync follows. Returns what happened, in words.
+    /// and a read-only comparison follows. A Download must not trigger an upload
+    /// through an implicit two-way sync, including when the download failed.
     func runManual(_ transfer: ManualTransfer) async -> String {
         let appID = transfer.appID
         guard !transfer.entries.isEmpty else { return "Nothing to copy." }
@@ -1166,7 +1170,7 @@ final class SteamCloudSync: ObservableObject {
             SteamLog.event("[steam-cloud] app=\(appID) manual \(verb) stopped reason=\(SteamSignIn.reason(error))")
         }
         busy.remove(appID)
-        _ = await sync(appID, reason: "after a manual \(verb)")
+        await check(appID)
         return message
     }
 

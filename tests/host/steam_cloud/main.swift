@@ -203,6 +203,23 @@ record.rules = rules
 let decoded = try! JSONDecoder().decode(SteamCloudRecord.self, from: try! JSONEncoder().encode(record))
 check(decoded == record, "record JSON round trip")
 
+// MARK: - Explicit Download versus ordinary synchronization
+
+let identicalDokimon = ["save.sav", "world_save.sav", "world_temp_data.sav"].map {
+    entry($0, .same, local: "cloud save bytes", cloud: "cloud save bytes")
+}
+let forced = SteamCloudManualSelection.entries(identicalDokimon, upload: false)
+check(forced.map(\.name) == identicalDokimon.map(\.name), "manual Download re-fetches all three identical Dokimon saves")
+check(SteamCloudManualSelection.entries(identicalDokimon, upload: true).isEmpty, "manual Upload does not rewrite identical files")
+let automatic = plan(identicalDokimon)
+check(automatic.download.isEmpty && automatic.upload.isEmpty, "automatic sync still skips matching saves")
+let mixedTransfers = identicalDokimon + [entry("cloud.sav", .cloudOnly, cloud: "remote"),
+    entry("local.sav", .localOnly, local: "local"), entry("changed.sav", .differ, local: "local", cloud: "remote")]
+let downNames = Set(SteamCloudManualSelection.entries(mixedTransfers, upload: false).map(\.name))
+let upNames = Set(SteamCloudManualSelection.entries(mixedTransfers, upload: true).map(\.name))
+check(downNames.count == 5 && !downNames.contains("local.sav"), "manual Download includes existing and cloud-only saves but not files absent from cloud")
+check(upNames == Set(["local.sav", "changed.sav"]), "manual Upload retains its existing selection rules")
+
 // MARK: - Backups
 
 let now = Date(timeIntervalSince1970: 2_000_000_000)

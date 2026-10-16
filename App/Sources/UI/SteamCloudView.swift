@@ -41,6 +41,8 @@ struct SteamCloudSection: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(working || gameRunning || cloud.isBusy(appID))
+                Text("Download fetches fresh cloud copies and backs up the local saves first, including files marked identical.")
+                    .font(.caption).foregroundStyle(Deck.dim)
                 if gameRunning {
                     Text("The game is running: its saves sync when it ends.").font(.caption).foregroundStyle(Deck.dim)
                 }
@@ -75,8 +77,13 @@ struct SteamCloudSection: View {
             switch await cloud.prepareManual(appID, upload: upload) {
             case .success(let t):
                 if t.entries.isEmpty {
-                    message = upload ? "Nothing to upload: Steam Cloud already has every save this iPhone has."
-                                     : "Nothing to download: this iPhone already has every save Steam Cloud has."
+                    if upload {
+                        message = "Nothing to upload: Steam Cloud already has every save this iPhone has."
+                    } else if state.audit.cloudFiles == 0 {
+                        message = "Steam Cloud returned no saved files for this game and account."
+                    } else {
+                        message = "The cloud files could not be mapped to supported save folders on this device. No saves were replaced."
+                    }
                 } else {
                     manual = t
                 }
@@ -133,7 +140,7 @@ struct SteamCloudSection: View {
         if let last = record.lastSync { parts.append("Last sync \(Self.date(last)).") } else { parts.append("Not synced yet on this iPhone.") }
         if let result = state.lastResult { parts.append(result) }
         if state.droppedInCloud > 0 { parts.append("\(state.droppedInCloud) save\(state.droppedInCloud == 1 ? " was" : "s were") removed from the cloud elsewhere and kept here (not sent back).") }
-        if !state.audit.unmapped.isEmpty { parts.append("\(state.audit.unmapped.count) cloud file\(state.audit.unmapped.count == 1 ? " is" : "s are") for another platform.") }
+        if !state.audit.unmapped.isEmpty { parts.append("\(state.audit.unmapped.count) cloud file\(state.audit.unmapped.count == 1 ? " has" : "s have") no supported save folder here.") }
         return parts.joined(separator: " ")
     }
 
