@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "status": "rebuild-validation-pending",
+  "sources": [
+    {"id":"port", "repository":"https://api.github.com/repositories/1175417517", "revision":"65e6fe8f0da45b28b610c71fda9791e89d1060a6", "filter_binaries":true},
+    {"id":"wine", "repository":"https://api.github.com/repositories/1177551732", "revision":"257f271cfffed9f22f7987cac53bc00095d092fe"},
+    {"id":"dxmt", "repository":"https://api.github.com/repositories/1219644501", "revision":"db546ee466ad50ec6463edb5fa183de11db43761"},
+    {"id":"dock", "repository":"https://api.github.com/repositories/1393407380", "revision":"e00078410845eb41d2618edd5e3ff0879a4c0735"},
+    {"id":"blink", "repository":"https://api.github.com/repositories/561183031", "revision":"f006a4fc6f9b8de9272504fdff0dbbe5ce5dc580"},
+    {"id":"freetype", "repository":"https://api.github.com/repositories/187000659", "revision":"42608f77f20749dd6ddc9e0536788eaad70ea4b5"},
+    {"id":"llvm", "repository":"https://api.github.com/repos/llvm/llvm-project", "revision":"8dfdcc7b7bf66834a761bd8de445840ef68e4d1a"}
+  ],
+  "embedded_archives": [
+    {"name":"ffmpeg-7.1.1.tar.xz", "sha256":"733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1"},
+    {"name":"gmp-6.3.0.tar.xz", "sha256":"a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"},
+    {"name":"nettle-3.10.1.tar.gz", "sha256":"b0fcdd7fc0cdea6e80dcf1dd85ba794af0d5b4a57e26397eee3bc193272d9132"},
+    {"name":"gnutls-3.8.9.tar.xz", "sha256":"69e113d802d1670c4d5ac1b99040b1f2d5c7c05daec5003813c049b5184820ed"}
+  ],
+  "converter": {
+    "version":"4.0 beta 2",
+    "installer_sha256":"1acc33c87ea663933df89721a998d066106685473020bcbe007cee7a16155734",
+    "unsigned_dylib_sha256":"073f903be98e973ff38f4d79f2c48d61ef938754a77b1caedda79c9f05a068c2",
+    "agreement_sha256":"f3c681e55d6f8f39b5b47fa124e16946697f4d7963d60b3e004472ae92d6326e",
+    "redistribution_review":"pending-exact-installer-terms"
+  }
+}
