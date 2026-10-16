@@ -19,7 +19,8 @@ Windows games require a build containing the Wine and signed-library resources.
 The workflows in `.github/workflows` build interpreter tests, Wine, DXMT and the iOS app.
 For a complete build, run Wine unix, Wine i386, DXMT and DXMT PE workflows first, then
 Build IPA. The first app build can contain only the engines whose resources are available.
-On a Mac, run `xcodegen generate` and build `PocketGamesNoJ.xcodeproj`, scheme `PocketGamesNoJ`.
+On a Mac, run `mkdir -p App/Generated/PE`, then `xcodegen generate` and build
+`PocketGamesNoJ.xcodeproj`, scheme `PocketGamesNoJ`.
 The generated Xcode project is intentionally untracked.
 
 ## License and provenance

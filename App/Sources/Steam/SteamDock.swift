@@ -2,10 +2,8 @@
 // Copyright 2026 125hz
 // Additional permission: see LICENSE-EXCEPTION.md
 
-// the Dock launch contract (DockGame, validation, the one-use sign-in transfer, the host's
-// environment and its numeric report). PocketGamesNoJ changes: the prefix is PocketGamesNoJ's
-// (Documents/wine-prefix); the JIT-pool policy, the explorer desktop launch line and the
-// offline-start helper are not taken (PocketGamesNoJ starts dockhost.exe itself, online).
+// Steam launch contract: validation, one-use sign-in transfer and numeric reports.
+// PocketGames No J uses Documents/wine-prefix and starts dockhost.exe online.
 
 import Foundation
 import Darwin
