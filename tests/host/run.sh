@@ -13,6 +13,7 @@ cc -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pthread \
     "$HERE/wine_startup/main.c" -o "$OUT/wine-startup-tests"
 "$OUT/wine-startup-tests" | tee "$OUT/wine-startup-tests.txt"
 python3 "$ROOT/tests/wow_window_bounds_test.py"
+python3 "$ROOT/tests/compliance_tools_test.py"
 swiftc --version | head -1
 # Steam Cloud saves: path mapping, comparison, sync decisions, backup retention.
 swiftc -O -o "$OUT/steam-cloud-tests" "$ROOT/App/Sources/Steam/SteamCloudCore.swift" "$HERE/steam_cloud/main.swift"

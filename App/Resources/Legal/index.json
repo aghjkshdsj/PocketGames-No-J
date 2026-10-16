@@ -230,6 +230,48 @@
       "file": "Dock-LICENSE-EXCEPTION.txt",
       "sha256": "534f059c2e9fe5de1acde82b920651b77ea3b4253f86837a3d6a81f54a5bdbbc",
       "sourceURL": "https://api.github.com/repos/willfaust/madeira-dock/git/blobs/5eac352c3149ce0cf7e643192cdc3423f9290ae6"
+    },
+    {
+      "id": "FreeType-BDF",
+      "title": "FreeType BDF driver — component notices",
+      "file": "FreeType-BDF.txt",
+      "sha256": "7984455e7e5a9faba3797c8bf095fbe10cc846316b7320aff8c58402e22b82fe",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/d7cb8c14ef6d969fed46151803382c6ea9da7dd9"
+    },
+    {
+      "id": "FreeType-PCF",
+      "title": "FreeType PCF driver — component notices",
+      "file": "FreeType-PCF.txt",
+      "sha256": "18d9782898d9eac04476e2f744678137b2a889689ed3e923e052fc396a86f86b",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/09ea970edadb5247e7209e5e0a3d3d30c2a7210a"
+    },
+    {
+      "id": "FreeType-Hash",
+      "title": "FreeType hashing — component notice",
+      "file": "FreeType-Hash.txt",
+      "sha256": "5285d96f6aa3188193d5fbefd8710ed6a46af185e0a43817c17acee5f4b1ab3d",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/313bbbb4b27e5b2f209f330f31e1497930c29a31"
+    },
+    {
+      "id": "FreeType-HarfBuzz-Bridge",
+      "title": "FreeType HarfBuzz bridge — component notice",
+      "file": "FreeType-HarfBuzz-Bridge.txt",
+      "sha256": "9eb9395c70e884f61081775892fae5949ad7762461bea5753dc5478b0c080302",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/71aee045503ff265884ccbd95c967a7a78aa36c6"
+    },
+    {
+      "id": "FreeType-Zlib",
+      "title": "FreeType bundled zlib — component notice",
+      "file": "FreeType-Zlib.txt",
+      "sha256": "871024b2721f77d335ed79d10a7f90f47a14502cf8f1aa6e9ae7448e06ff7988",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/5c7a884c9373978c500d68f063a2e0cd772f384c"
+    },
+    {
+      "id": "FFmpeg-IJG",
+      "title": "FFmpeg — Independent JPEG Group attribution and notices",
+      "file": "FFmpeg-IJG.txt",
+      "sha256": "9ce9688e1d0a4f1efdbc81163f3301a1a2f193648a5a0f12244563e03e79ed13",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/9547622e7843d980d9381dd1b1d3e0d2ee118290"
     }
   ]
 }

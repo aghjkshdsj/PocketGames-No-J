@@ -12,6 +12,24 @@ new permissions or a determination that Apple can distribute the combination.
 The project remains GPL-3.0-or-later with its existing additional permission.
 No copyright assignment or proprietary relicense is performed.
 
+## Prepared follow-up materials
+
+- The offline bundle includes the nested FreeType BDF/PCF, hashing, HarfBuzz
+  bridge and bundled-zlib notices, plus the exact FFmpeg IJG notices and credit.
+  These are preserved notices, not changes to the compiled libraries.
+- `compliance/source-lock.json` records the pinned source inputs and converter
+  provenance hashes. `tools/collect_source_kit.py` collects and verifies source
+  snapshots without changing the app or adopting new license terms.
+- `tools/audit_ipa_licenses.py` checks an existing IPA's notice hashes and
+  retained IJG symbols, and can compare converter payload sections with the
+  pristine pinned binary. Stripped/absent symbols do not prove code absence.
+- `docs/LGPL_REBUILD.md` identifies the remaining full modified-library
+  rebuild, relink and installation demonstration. Source collection alone
+  does not complete that verification.
+- `docs/APP_STORE_PERMISSION_DRAFT.md` contains unadopted wording scoped to
+  Dan-controlled contributions. `docs/CONVERTER_REDISTRIBUTION_REVIEW.md`
+  records the exact agreement question without replacing the converter.
+
 Before App Store submission, resolve these remaining distribution questions:
 
 - Have a qualified reviewer check GPL/LGPL rights against Apple's actual
