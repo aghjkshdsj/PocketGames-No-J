@@ -31,7 +31,10 @@ jobs:
             python3 - <<'PY'
           from pathlib import Path
           p = Path('project.yml')
-          p.write_text(p.read_text().replace('"-O2"', '"-O0"'))
+          s = p.read_text().replace('"-O2"', '"-O0"')
+          s = s.replace('SWIFT_OPTIMIZATION_LEVEL: "-O"', 'SWIFT_OPTIMIZATION_LEVEL: "-Onone"')
+          s = s.replace('SWIFT_COMPILATION_MODE: wholemodule', 'SWIFT_COMPILATION_MODE: incremental')
+          p.write_text(s)
           PY
           fi
           xcodegen generate
