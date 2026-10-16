@@ -88,6 +88,7 @@ step_ntdll() {
     # DanPort Dock without JIT: named hosts resolve to nothing at once (engine/wine/patches/dns_refuse.py).
     python3 "$HERE/patches/dns_refuse.py" "$W"
     python3 "$HERE/patches/nojit_dylib.py" "$M"
+    python3 "$HERE/patches/wow_window_bounds.py" "$M"
     # Another game in the running session: process socket entries reused, a killed main thread ends its
     # process, an exited process's sleeping threads are ended (engine/wine/patches/session_reuse.py).
     python3 "$HERE/patches/session_reuse.py" "$M" ntdll
