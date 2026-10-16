@@ -174,7 +174,7 @@ enum SteamCloudBackups {
 
     static func delete(_ appID: Int, _ backup: SteamCloudBackup, root: URL = SteamCloudBackups.root) throws {
         let target = try checkedFolder(appID, name: backup.folder, root: root)
-        guard backup.appID == appID, list(appID, root: root).contains(where: { $0.folder == backup.folder }) else {
+        guard backup.appID == appID, list(appID, root: root).contains(backup) else {
             throw SteamCloudBackupError.missingBackup
         }
         try FileManager.default.removeItem(at: target)
