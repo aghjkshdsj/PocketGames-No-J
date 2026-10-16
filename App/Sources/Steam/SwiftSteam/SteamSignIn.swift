@@ -13,11 +13,11 @@ import UIKit
 /// (SteamTokenStore: this device only, available while unlocked).
 enum SteamSignIn {
     /// Posted on the main queue after a sign-in is stored or removed.
-    static let didChange = Notification.Name("MadeiraSteamSignInDidChange")
+    static let didChange = Notification.Name("PocketGamesSteamSignInDidChange")
 
     /// `env.NAME` from madeira.cfg, then the process environment. "0" is off.
     static func flag(_ name: String, default fallback: Bool) -> Bool {
-        guard let value = MadeiraConfig.get("env." + name) ?? ProcessInfo.processInfo.environment[name] else {
+        guard let value = SteamConfig.get("env." + name) ?? ProcessInfo.processInfo.environment[name] else {
             return fallback
         }
         return value.trimmingCharacters(in: .whitespaces) != "0"

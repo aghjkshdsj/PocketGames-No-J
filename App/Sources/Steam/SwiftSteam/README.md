@@ -10,7 +10,7 @@ GPL-3.0-or-later with the Madeira Converter Exception, as in each file's header.
 
 `../SteamInstall.swift` and `../SteamKeyValues.swift` (install paths, VDF
 parser) come unchanged from the same commit's `app/Madeira/`; SwiftSteam uses
-them. PocketGamesNoJ supplies the two app types it uses (`MadeiraConfig`, `LogStore.log`)
+them. PocketGames No J supplies the two app types it uses (`SteamConfig`, `LogStore.log`)
 in `../SteamShims.swift`. Keep local changes out of this folder so it can be
 refreshed from a newer Madeira commit.
 
