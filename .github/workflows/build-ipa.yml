@@ -273,11 +273,6 @@ jobs:
       - name: Verify complete game bundle
         run: python3 tools/validate_runtime.py build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
 
-      - name: Prove modified LGPL library reached the linked application
-        if: inputs.lgpl_validation
-        run: |
-          python3 tools/lgpl_relink_validation.py verify --app build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
-
       - name: Record App Store structural audit (sideload packaging is not cleared for submission)
         run: |
           python3 tools/audit_app_store.py --app build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app --output build/app-store-audit.json
@@ -323,6 +318,12 @@ jobs:
               if [ -d "Payload/PocketGamesNoJ.app/$d" ]; then echo "  - $d: $(du -sh "Payload/PocketGamesNoJ.app/$d" | cut -f1)"; fi
             done
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Check the signed payload so the evidence hash identifies the exact
+      # executable in the delivered ZIP, including the ad-hoc signature.
+      - name: Prove modified LGPL library reached the packaged application
+        if: inputs.lgpl_validation
+        run: python3 tools/lgpl_relink_validation.py verify --app Payload/PocketGamesNoJ.app
 
       - uses: actions/upload-artifact@v5
         with:
