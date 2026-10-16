@@ -1,0 +1,3 @@
+// Default: no Wine. engine/wine/stage-app.sh overwrites this in CI.
+PocketGamesNoJ_WINE_HEADERS =
+PocketGamesNoJ_WINE_LIBS =

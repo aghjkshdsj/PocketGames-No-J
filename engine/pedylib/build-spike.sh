@@ -1,0 +1,153 @@
+#!/bin/bash
+# No-JIT spike, part 1 (Linux CI host): build the spike DLL the way Wine's PE DLLs are
+# built (llvm-mingw), with 16 KB section alignment, for ARM64EC (what Wine uses) and
+# plain ARM64, and convert each to <name>.img + <name>.S for the app build to link
+# as signed dylibs (engine/pedylib/link-dylibs.sh, macOS).
+#   engine/pedylib/build-spike.sh <out-dir> [toolchain-cache-dir]
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+OUT="${1:?out dir}"
+CACHE="${2:-$HERE/toolchain}"
+# Same llvm-mingw release as Madeira's Wine build (engine/wine/PIN), Linux x86-64 host.
+LLVM_MINGW=llvm-mingw-20260421-ucrt-ubuntu-22.04-x86_64
+LLVM_MINGW_URL=https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/$LLVM_MINGW.tar.xz
+LLVM_MINGW_SHA256=f8b8cce779affeab47bcaec6ce6e9e768b166094a366123ef64b2d0b389cc121
+
+TC="$CACHE/$LLVM_MINGW/bin"
+if [ ! -x "$TC/clang" ]; then
+    mkdir -p "$CACHE"
+    curl -fsSL -o "$CACHE/llvm-mingw.tar.xz" "$LLVM_MINGW_URL"
+    echo "$LLVM_MINGW_SHA256  $CACHE/llvm-mingw.tar.xz" | sha256sum -c -
+    tar -C "$CACHE" -xf "$CACHE/llvm-mingw.tar.xz"
+    rm "$CACHE/llvm-mingw.tar.xz"
+fi
+export PATH="$TC:$PATH"
+clang --version | head -1
+
+mkdir -p "$OUT"
+B="$OUT/obj"
+mkdir -p "$B"
+build_one() {
+    local arch="$1"
+    triple="$arch-w64-mingw32"
+    m=$([ "$arch" = arm64ec ] && echo arm64ec || echo arm64)
+    llvm-dlltool -m "$m" -d "$HERE/spike/pocketgamesnoj.def" -l "$B/libpocketgamesnoj-$arch.a"
+    # -O2 and no FMA contraction: the same code generation as the app's native kernels.
+    # -nostdlib: like Wine's DLLs, no CRT; the app is the only import.
+    # --section-alignment 16 KB: code and data never share an iOS page.
+    LINK=(-shared -nostdlib -Wl,--section-alignment=0x4000 -Wl,--file-alignment=0x200
+          -Wl,--image-base=0x6f0000000 "$B/libpocketgamesnoj-$arch.a")
+    CFLAGS=(-target "$triple" -O2 -ffp-contract=off -fno-strict-aliasing -fno-stack-protector
+            -I"$ROOT/engine/guest")
+    # arm64ec_crt.c: the CHPE metadata + load config Wine DLLs get from winecrt0/winebuild.
+    "$triple-clang" "${CFLAGS[@]}" -o "$B/spike-$arch.dll" "$HERE/spike/spike.c" "$HERE/spike/arm64ec_crt.c" "${LINK[@]}"
+    llvm-readobj --file-headers --sections --coff-imports --coff-exports "$B/spike-$arch.dll" |
+        grep -E 'Machine|SectionAlignment|Name:|VirtualAddress|Characteristics:|Symbol' | head -80 || true
+    [ "$arch" = arm64ec ] && { llvm-readobj --coff-load-config "$B/spike-$arch.dll" | grep -iE 'CHPE|Arm64EC|dispatch|icall' | head -40 || true; }
+    python3 "$HERE/pe2dylib.py" convert --strict "$B/spike-$arch.dll" "$OUT"
+}
+
+# Each variant on its own: plain ARM64 first (needs the least), then ARM64EC (what Wine uses).
+fail=0
+for arch in aarch64 arm64ec; do
+    ( set -e; build_one "$arch" ) || { echo "::warning::spike DLL for $arch failed"; fail=1; }
+done
+
+# Step B (Wine without JIT): the stub x64 emulator Wine loads as xtajit64.dll, and an
+# ARM64EC Windows Hello. PE files go to $OUT/winepe (bundled as is: Wine opens the files),
+# their signed-dylib sources to $OUT/wine (named by full file name, as Wine looks them up).
+build_wine_extras() {
+    local EC=(-target arm64ec-w64-mingw32 -O2 -fno-stack-protector -Wl,--section-alignment=0x4000)
+    mkdir -p "$OUT/winepe" "$OUT/wine"
+    arm64ec-w64-mingw32-clang "${EC[@]}" -shared -nostdlib -o "$OUT/winepe/xtajit64.dll" \
+        "$HERE/emu/xtajit64_stub.c" "$HERE/spike/arm64ec_crt.c" -lntdll
+    arm64ec-w64-mingw32-clang "${EC[@]}" -o "$OUT/winepe/hello-arm64ec.exe" "$HERE/hello/hello-arm64ec.c"
+    llvm-readobj --coff-imports "$OUT/winepe/hello-arm64ec.exe" | grep -E 'Name:' | head -20 || true
+    for f in "$OUT/winepe/xtajit64.dll" "$OUT/winepe/hello-arm64ec.exe"; do
+        python3 "$HERE/pe2dylib.py" convert --strict --keep-ext "$f" "$OUT/wine" | tail -3
+    done
+    # The x64 test suite for FXI inside Wine (step D): plain x86-64, its code is interpreted.
+    x86_64-w64-mingw32-clang -O2 -c -o "$B/suite-x64.o" "$HERE/hello/suite-x64.c"
+    x86_64-w64-mingw32-clang++ -O2 -c -o "$B/suite-x64-cxx.o" "$HERE/hello/suite-x64-cxx.cpp"
+    x86_64-w64-mingw32-clang++ -static -o "$OUT/winepe/suite-x64.exe" "$B/suite-x64.o" "$B/suite-x64-cxx.o"
+    llvm-readobj --coff-imports "$OUT/winepe/suite-x64.exe" | grep -E 'Name:' | sort -u | head -20 || true
+}
+( set -e; build_wine_extras ) || { echo "::warning::Wine no-JIT extras failed"; fail=1; }
+
+# 32-bit games without JIT (WoW64, docs/INTERPRETERS.md), apart from the x64 pieces above so a
+# failure here leaves those alone. aarch64 PE files go to $OUT/winepe-a64 (bundled with the
+# aarch64 farm), their dylib sources to $OUT/wine-a64; i386 programs to $OUT/winepe-x86 (bundled
+# with the i386 farm).
+build_wow64_extras() {
+    # The same hello as plain ARM64: an aarch64 Wine session, the 64-bit half of every WoW64
+    # (32-bit) process. Its dylib goes with the aarch64 farm's (wine-a64).
+    mkdir -p "$OUT/winepe-a64" "$OUT/wine-a64"
+    aarch64-w64-mingw32-clang -O2 -fno-stack-protector -Wl,--section-alignment=0x4000 \
+        -o "$OUT/winepe-a64/hello-aarch64.exe" "$HERE/hello/hello-arm64ec.c"
+    llvm-readobj --file-headers --coff-imports "$OUT/winepe-a64/hello-aarch64.exe" | grep -E 'Machine|Name:' | head -20 || true
+    python3 "$HERE/pe2dylib.py" convert --strict --keep-ext "$OUT/winepe-a64/hello-aarch64.exe" "$OUT/wine-a64" | tail -3
+    # The WoW64 CPU module wow64.dll loads as xtajit.dll (docs/INTERPRETERS.md, stage 3): FXI32's
+    # front end. ntdll is its only import (the 64-bit half of a WoW64 process has nothing else).
+    llvm-dlltool -m arm64 -d "$HERE/emu/xtajit_wow_ntdll.def" -l "$B/libntdll_wow.a"
+    aarch64-w64-mingw32-clang -O2 -fno-stack-protector -shared -nostdlib -Wl,--section-alignment=0x4000 \
+        -o "$OUT/winepe-a64/xtajit.dll" "$HERE/emu/xtajit_wow.c" "$B/libntdll_wow.a"
+    local want="BTCpuFlushInstructionCache2 BTCpuFlushInstructionCacheHeavy BTCpuGetBopCode BTCpuGetContext
+        BTCpuIsProcessorFeaturePresent BTCpuNotifyMapViewOfSection BTCpuNotifyMemoryAlloc BTCpuNotifyMemoryDirty
+        BTCpuNotifyMemoryFree BTCpuNotifyMemoryProtect BTCpuNotifyProcessExecuteFlagsChange BTCpuNotifyReadFile
+        BTCpuNotifyUnmapViewOfSection BTCpuProcessInit BTCpuProcessTerm BTCpuResetToConsistentState BTCpuSetContext
+        BTCpuSimulate BTCpuSuspendLocalThread BTCpuThreadInit BTCpuThreadTerm BTCpuUpdateProcessorInformation
+        __wine_get_unix_opcode PocketGamesWowHost PocketGamesWowCall"
+    local exports
+    exports=$(llvm-readobj --coff-exports "$OUT/winepe-a64/xtajit.dll" | sed -n 's/^ *Name: //p')
+    for e in $want; do grep -qx "$e" <<< "$exports" || { echo "xtajit.dll lacks export $e" >&2; return 1; }; done
+    llvm-readobj --coff-imports "$OUT/winepe-a64/xtajit.dll" | grep -E 'Name:' | head -20 || true
+    python3 "$HERE/pe2dylib.py" convert --strict --keep-ext "$OUT/winepe-a64/xtajit.dll" "$OUT/wine-a64" | tail -3
+    # Windows Hello as a 32-bit program (the same source, i686): the first x86 code FXI32 runs
+    # inside Wine; bundled in the i386 farm (C:\windows\syswow64) by build-ipa.yml.
+    mkdir -p "$OUT/winepe-x86"
+    i686-w64-mingw32-clang -O2 -o "$OUT/winepe-x86/hello-i386.exe" "$HERE/hello/hello-arm64ec.c"
+    llvm-readobj --file-headers --coff-imports "$OUT/winepe-x86/hello-i386.exe" | grep -E 'Machine|Name:' | head -20 || true
+    # The x86 test suite (stage 4): the x64 suite's tests plus a window-procedure callback.
+    i686-w64-mingw32-clang -O2 -c -o "$B/suite-x86.o" "$HERE/hello/suite-x86.c"
+    i686-w64-mingw32-clang++ -O2 -c -o "$B/suite-x86-cxx.o" "$HERE/hello/suite-x64-cxx.cpp"
+    i686-w64-mingw32-clang++ -static -o "$OUT/winepe-x86/suite-x86.exe" "$B/suite-x86.o" "$B/suite-x86-cxx.o" -luser32
+    llvm-readobj --coff-imports "$OUT/winepe-x86/suite-x86.exe" | grep -E 'Name:' | sort -u | head -20 || true
+}
+( set -e; build_wow64_extras ) || echo "::warning::WoW64 (32-bit) extras failed: no 32-bit test programs or CPU module"
+
+# Madeira Dock (github.com/willfaust/madeira-dock, GPL-3.0-or-later with the Madeira Converter
+# Exception, Copyright 2026 125hz): dockhost.exe, the headless host that loads Valve's own Steam
+# client so games that need Steam running start (App/Sources/Steam/SteamDock.swift). Built as
+# Madeira's build/madeira-dock/build.sh does (static runtime, stripped), from the commit Madeira
+# 65e6fe8f pins; its notices go next to it. Without it the app keeps starting games directly.
+DOCK_SHA=e00078410845eb41d2618edd5e3ff0879a4c0735
+build_dock() {
+    local src="$B/madeira-dock"
+    rm -rf "$src"; mkdir -p "$src" "$OUT/winepe"
+    curl -fsSL "https://codeload.github.com/willfaust/madeira-dock/tar.gz/$DOCK_SHA" | tar -xz -C "$src" --strip-components=1
+    # PocketGamesNoJ change: MADEIRA_DOCK_SIGNIN_MS lengthens the 90 s sign-in and game-start waits
+    # for a client running without JIT (the app sets it only then).
+    patch -p1 -d "$src" < "$HERE/madeira-dock-signin-wait.patch"
+    # PocketGamesNoJ change: MADEIRA_DOCK_CM_TRANSPORT=netfilter has Valve's client prefer its UDP/TCP
+    # CM transport (Valve's own channel encryption) over TLS WebSockets, which do not complete
+    # without JIT (the app sets it only then).
+    patch -p1 -d "$src" < "$HERE/madeira-dock-cm-transport.patch"
+    x86_64-w64-mingw32-clang -std=c11 -O2 -Wall -Wextra -Wno-cast-function-type \
+        -static -Wl,--strip-all -Wl,--no-insert-timestamp \
+        -o "$OUT/winepe/dockhost.exe" "$src"/src/*.c -ladvapi32
+    {
+        cat "$src/LICENSE"
+        printf '\nCorresponding source: https://github.com/willfaust/madeira-dock (commit %s)\n' "$DOCK_SHA"
+        printf 'Modified by PocketGamesNoJ: engine/pedylib/madeira-dock-signin-wait.patch and madeira-dock-cm-transport.patch in https://github.com/aghjkshdsj/PocketGames-No-J\n'
+        printf '\n\n==== LICENSE-EXCEPTION.md (Madeira Converter Exception) ====\n\n'; cat "$src/LICENSE-EXCEPTION.md"
+        printf '\n\n==== COPYING (GNU General Public License, version 3) ====\n\n'; cat "$src/COPYING"
+        printf '\n\n==== MinGW-w64 runtime notice (statically linked runtime) ====\n\n'; cat "$src/notices/MinGW-w64-runtime.txt"
+        printf '\n\n==== LLVM runtime notice ====\n\n'; cat "$src/notices/LLVM.txt"
+    } > "$OUT/winepe/dock-notices.txt"
+    sha256sum "$OUT/winepe/dockhost.exe"
+    llvm-readobj --file-headers "$OUT/winepe/dockhost.exe" | grep -E 'Machine' || true
+}
+( set -e; build_dock ) || echo "::warning::Madeira Dock (dockhost.exe) did not build: games start without Steam"
+ls -la "$OUT"
+exit $fail

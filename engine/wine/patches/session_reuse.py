@@ -1,0 +1,865 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Session reuse (docs/SESSION_REUSE.md): another game starts in the running Wine session.
+
+Madeira runs one Wine session per app run: its wineserver cannot start a second time in one
+process (init_registry aborts on "\\Registry"), and __wine_main's session-wide setup (virtual_init,
+the signal and Mach handlers, the first TEB) cannot run twice either. A Wine session can still
+hold more than one top-level program, as on a desktop where `wine b.exe` joins the wineserver
+`wine a.exe` started: the server takes any number of clients (request_ios.c,
+master_socket_handle_client is create_process with no parent), and Madeira already brings
+processes up inside a running session for a program's children (loader_ios.c,
+wine_ios_child_main). A program with no parent gets no startup info from the server, so the
+loader builds its process from argv and the environment, as for the session's first program
+(env_ios.c, build_initial_params).
+
+  app    app/Madeira/WineProcessBridge.m (engine/wine/stage-app.sh): with
+         PocketGamesNoJ_SESSION_REUSE=1 a session's end leaves the wineserver running, and the next
+         wine_process_start boots its program through wine_ios_child_main on a new socketpair
+         instead of __wine_main. Without the variable nothing changes.
+  ntdll  build/ntdll-unix/server_ios.c (engine/wine/build-unix.sh): the process socket table
+         (64 entries, never reused) reuses the entries of exited processes once it is full, and
+         the session's first program closes its socket for good when it exits (fd_socket = -1, so
+         a late thread of it cannot close a number another process got since). A process's main
+         thread that the server killed ends its process through the normal exit path (KILLED_*).
+         wine/dlls/ntdll/unix/sync.c, build/ntdll-unix/signal_arm64_ios.c and virtual_ios.c: the
+         threads an exited process left asleep in its guest window are ended (REAP_*), so the
+         window and its memory go back when the next 32-bit program starts.
+  server wine/server/process.c, build/wineserver/request_ios.c and fd_ios.c: the app's Force
+         quit ends every program of the session, as TerminateProcess does (FORCE_*).
+         wine/server/thread.c: a thread that ended itself but whose request pipe never closed is
+         ended 250 ms later (SELF_EXIT_FIXES).
+  win32u wine/dlls/win32u/window.c (engine/wine/build-unix.sh): a window's client object (WND) is
+         taken from the shared slot only when it is that window's (WINDOW_FIXES, below); and
+         build/win32u-unix/class_ios.c: [winproc] diagnostics.
+
+Usage: session_reuse.py <madeira checkout> app|ntdll|server|win32u. Idempotent (marker line).
+"""
+import sys
+
+MARK = "/* PocketGamesNoJ session-reuse */"
+
+APP_HELPERS = MARK + r'''
+/* PocketGamesNoJ session reuse (engine/wine/patches/session_reuse.py, docs/SESSION_REUSE.md).
+ *
+ * With PocketGamesNoJ_SESSION_REUSE=1 the end of a session leaves the wineserver running, and the
+ * next wine_process_start boots its program as a new top-level process of that session: a new
+ * client of the running server (its own socketpair, as for the first program), brought up by
+ * wine_ios_child_main, the path a program's children take here. The server gives a process with
+ * no parent no startup info, so the loader builds it from argv and the environment as for the
+ * first program. __wine_main runs once per app run. */
+static int g_session_booted;      /* __wine_main has run in this app run */
+static int g_next_fd = -1;        /* a later program's end of its server socketpair */
+static int g_stale_children;      /* children of earlier programs still listed when this one started */
+static BOOL g_session_arm64ec;    /* the first program's farm in system32: ARM64EC (64-bit) or aarch64 */
+extern void wine_ios_child_main(int argc, char *argv[], int child_fd_socket);   /* loader_ios.c */
+extern _Thread_local uint16_t ios_child_main_machine;   /* process_ios.c (WORD) */
+extern void ios_child_boot_unlock(void);                 /* loader_ios.c */
+extern void ios_wow_window_release_current(void);        /* virtual_ios.c */
+extern void ios_wow_window_retire_current(void);         /* virtual_ios.c */
+extern pthread_key_t ios_teb_tls_key;
+extern int madeira_live_game_children(char *buf, int len, double max_age);   /* process_ios.c */
+extern volatile int g_pocketgamesnoj_force_quits __attribute__((weak));   /* request_ios.c: the app's Force quits */
+static int g_force_quits_at_start;   /* their count when this program started */
+static int pocketgamesnoj_session_reuse(void)
+{
+    const char *v = getenv("PocketGamesNoJ_SESSION_REUSE");
+    return v && v[0] == '1';
+}
+static int pocketgamesnoj_force_quits(void)
+{
+    return &g_pocketgamesnoj_force_quits ? g_pocketgamesnoj_force_quits : 0;
+}
+/* 1 when another program can start in this session now: the first one has run, nothing runs
+ * and the wineserver was kept. */
+int wine_session_reusable(void)
+{
+    return g_session_booted && !g_wine_running && wineserver_is_running();
+}
+'''
+
+APP_FIXES = [
+    # The helpers, after the last static they use (g_wine_running is above it).
+    ("static char *g_prefix_path = NULL;\n",
+     "static char *g_prefix_path = NULL;\n" + APP_HELPERS),
+    # A later program's server socket is not the first program's WINESERVERSOCKET (only
+    # server_init_process reads that); wine_process_thread hands it to wine_ios_child_main.
+    ('    setenv("WINESERVERSOCKET", fd_str, 1);\n',
+     '    if (g_session_booted) g_next_fd = pair[1];   /* PocketGamesNoJ session reuse: a later program */\n'
+     '    else setenv("WINESERVERSOCKET", fd_str, 1);\n'),
+    # A later program of the other kind (a 64-bit game after a 32-bit one, or the reverse) runs as
+    # Madeira's cross-architecture children do: system32 stays the session's farm, whose ntdll and
+    # system DLLs the running session uses (an x64 process finds its own in sysx64, a 32-bit one
+    # its wow64 DLLs, which only the aarch64 farm has and which are linked into an ARM64EC
+    # system32 as non-colliding names). Relinking it to the new program's farm would swap the
+    # session's DLLs under it.
+    ("        if (is_i386_target) use_arm64ec = NO;\n",
+     "        if (is_i386_target) use_arm64ec = NO;\n"
+     "        if (g_session_booted) use_arm64ec = g_session_arm64ec;   /* PocketGamesNoJ session reuse */\n"
+     "        else g_session_arm64ec = use_arm64ec;\n"),
+    # argv and the image path stay readable after the boot (main_argv points at them).
+    ("        char exe_path[512];\n", "        static char exe_path[512];   /* PocketGamesNoJ session reuse: main_argv[1] */\n"),
+    ("        char *argv[72];\n", "        static char *argv[72];   /* PocketGamesNoJ session reuse: main_argv */\n"),
+    # An earlier program's working folder is not this one's.
+    ('        const char *launch_workdir = getenv("MADEIRA_WORKDIR");',
+     '        if (g_session_booted) unsetenv("MADEIRA_INITIAL_CWD");   /* PocketGamesNoJ session reuse */\n'
+     '        const char *launch_workdir = getenv("MADEIRA_WORKDIR");'),
+    # The boot: __wine_main once, then wine_ios_child_main for every later program.
+    ("        ios_main_image_i386 = is_i386_target ? 1 : 0;\n"
+     "        madeira_publish_host_probe();   /* both FEX modules read it (A12/A13: FlagM, FlagM2) */\n"
+     "\n"
+     "        if (setjmp(wine_ios_exit_jmpbuf) == 0) {\n"
+     "            __wine_main(argc, argv);\n"
+     '            dprintf(STDERR_FILENO, "[WineProc] __wine_main returned normally\\n");\n'
+     "        } else {\n"
+     '            dprintf(STDERR_FILENO, "[WineProc] Wine exited with code %d (caught by longjmp)\\n", wine_ios_exit_code);\n'
+     "        }\n",
+     "        /* PocketGamesNoJ session reuse: a later program keeps the session's main-image machine\n"
+     "         * (the unix side read it when the session started) and boots like a child. */\n"
+     "        volatile int next_program = g_session_booted;\n"
+     "        if (!next_program) ios_main_image_i386 = is_i386_target ? 1 : 0;\n"
+     "        madeira_publish_host_probe();   /* both FEX modules read it (A12/A13: FlagM, FlagM2) */\n"
+     "        g_stale_children = next_program ? madeira_live_game_children(NULL, 0, -1.0) : 0;\n"
+     "        g_force_quits_at_start = pocketgamesnoj_force_quits();\n"
+     "\n"
+     "        if (setjmp(wine_ios_exit_jmpbuf) == 0) {\n"
+     "            if (next_program) {\n"
+     "                ios_child_main_machine = is_i386_target ? 0x014c : 0x8664;   /* i386: a guest window first */\n"
+     '                dprintf(STDERR_FILENO, "[session-reuse] %s starts in the running Wine session as a new "\n'
+     '                        "top-level process (%s, server fd %d, %d child process(es) of earlier programs listed)\\n",\n'
+     '                        exe_path, is_i386_target ? "32-bit" : "64-bit", g_next_fd, g_stale_children);\n'
+     "                wine_ios_child_main(argc, argv, g_next_fd);\n"
+     "                /* it returns only when the boot failed (it named the stage) */\n"
+     '                dprintf(STDERR_FILENO, "[session-reuse] %s did not start: its boot failed\\n", exe_path);\n'
+     "                wine_launched_process_did_exit((int)0xC0000142);   /* STATUS_DLL_INIT_FAILED for the app */\n"
+     "            } else {\n"
+     "                g_session_booted = 1;\n"
+     "                __wine_main(argc, argv);\n"
+     '                dprintf(STDERR_FILENO, "[WineProc] __wine_main returned normally\\n");\n'
+     "            }\n"
+     "        } else {\n"
+     '            dprintf(STDERR_FILENO, "[WineProc] Wine exited with code %d (caught by longjmp)\\n", wine_ios_exit_code);\n'
+     "            /* The first program's status comes from ntdll (process_exit_wrapper); a later one has a\n"
+     "             * process slot, like a child, whose exit reports nothing: report it here. */\n"
+     "            if (next_program) wine_launched_process_did_exit(wine_ios_exit_code);\n"
+     "        }\n"
+     "        if (next_program) {\n"
+     "            /* what ios_child_thread_entry does when a child's boot thread is done */\n"
+     "            ios_child_boot_unlock();\n"
+     "            ios_wow_window_release_current();   /* a boot that failed before binding its window */\n"
+     "            pthread_setspecific(ios_teb_tls_key, NULL);\n"
+     "        }\n"),
+    # Children of earlier programs that never released their slot do not hold this session up. Nor,
+    # 3 s after the app's Force quit, does a child whose main thread never got back to its start
+    # (build 171: the last Steins;Gate's Game.exe ran its exit path, then faulted in a unix call
+    # with its window already released, and the session waited for its slot for good).
+    ("                while ((n = madeira_live_game_children(names, sizeof names, -1.0)) > 0) {\n",
+     "                unsigned forced_ticks = 0;   /* PocketGamesNoJ session reuse */\n"
+     "                while ((n = madeira_live_game_children(names, sizeof names, -1.0)) > g_stale_children) {   /* PocketGamesNoJ */\n"
+     "                    if (pocketgamesnoj_force_quits() != g_force_quits_at_start && ++forced_ticks > 15) {\n"
+     '                        dprintf(STDERR_FILENO, "[session-reuse] Force quit 3 s ago and %d child process(es) (%s) "\n'
+     '                                "still hold their slot: a thread of theirs never got back to its start; the "\n'
+     '                                "session goes on without them\\n", n - g_stale_children, names);\n'
+     "                        break;\n"
+     "                    }\n"),
+    # The running flag drops once this thread's own clean-up is done: the next program's
+    # environment (set by the app before it starts) must not lose the per-launch variables.
+    ("        g_wine_running = 0;\n"
+     "        /* ml1184: these belong to the launch that just ended; a later session in this app\n",
+     "        const int keep_session = pocketgamesnoj_session_reuse();   /* PocketGamesNoJ session reuse */\n"
+     "        if (!keep_session) g_wine_running = 0;\n"
+     "        /* ml1184: these belong to the launch that just ended; a later session in this app\n"),
+    ('        // Stop wineserver to prevent CPU spin (iOS kills for excessive CPU)\n'
+     '        dprintf(STDERR_FILENO, "[WineProc] stopping wineserver...\\n");\n'
+     '        wineserver_stop();\n',
+     '        if (keep_session) {\n'
+     '            /* The first program\'s guest window is never handed on (it holds the PEB every later\n'
+     '             * process is cloned from), but it must stop answering for this thread\'s pthread_t:\n'
+     '             * ios_wow_slot_current() falls back to the slot\'s boot thread, and a later boot thread\n'
+     '             * can get the same pthread_t (build 156: Forager booted into Steins;Gate\'s launcher\'s\n'
+     '             * window). Retired, the slot keeps its memory and matches nothing. */\n'
+     '            if (!next_program) ios_wow_window_retire_current();\n'
+     '            dprintf(STDERR_FILENO, "[session-reuse] the wineserver keeps running: another program can start "\n'
+     '                    "in this session\\n");\n'
+     '        } else {\n'
+     '        // Stop wineserver to prevent CPU spin (iOS kills for excessive CPU)\n'
+     '        dprintf(STDERR_FILENO, "[WineProc] stopping wineserver...\\n");\n'
+     '        wineserver_stop();\n'
+     '        }\n'),
+    ('        dprintf(STDERR_FILENO, "[WineProc] Wine process thread finished cleanly\\n");\n',
+     '        dprintf(STDERR_FILENO, "[WineProc] Wine process thread finished cleanly\\n");\n'
+     '        if (keep_session) g_wine_running = 0;   /* PocketGamesNoJ session reuse */\n'),
+]
+
+NTDLL_FIXES = [
+    # Reuse the entry of an exited process once the table is full. The count never passes the
+    # table (it did: readers then walked past its end), and the first 64 processes of an app run
+    # take the same entries as before.
+    ("static void ios_register_proc_socket(void *peb_id, int fd)\n"
+     "{\n"
+     "    int idx = __sync_fetch_and_add(&ios_proc_socket_count, 1);\n"
+     "    if (idx >= IOS_MAX_PROC_SOCKETS)\n"
+     "    {\n"
+     '        wine_log_write("[Wine child] proc-socket table FULL (%d)!", idx);\n'
+     "        return;\n"
+     "    }\n"
+     "    ios_fdt_reg( fd, FDT_MASTER, peb_id );\n"
+     "    ios_proc_sockets[idx].fd = fd;\n"
+     "    ios_proc_sockets[idx].exiting = FALSE;\n"
+     "    __sync_synchronize();\n"
+     "    ios_proc_sockets[idx].peb = peb_id;\n"
+     "}\n",
+     "static void ios_register_proc_socket(void *peb_id, int fd)\n"
+     "{\n"
+     "    " + MARK + "\n"
+     "    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;\n"
+     "    int idx = -1, i;\n"
+     "\n"
+     "    pthread_mutex_lock( &lock );\n"
+     "    if (ios_proc_socket_count < IOS_MAX_PROC_SOCKETS) idx = ios_proc_socket_count;\n"
+     "    else for (i = 0; i < IOS_MAX_PROC_SOCKETS; i++) if (!ios_proc_sockets[i].peb) { idx = i; break; }\n"
+     "    if (idx < 0)\n"
+     "    {\n"
+     "        pthread_mutex_unlock( &lock );\n"
+     '        wine_log_write("[Wine child] proc-socket table FULL (%d live processes)!", IOS_MAX_PROC_SOCKETS);\n'
+     "        return;\n"
+     "    }\n"
+     "    if (idx < ios_proc_socket_count)\n"
+     '        wine_log_write("[Wine child] proc-socket entry %d reused (its process exited)", idx);\n'
+     "    ios_fdt_reg( fd, FDT_MASTER, peb_id );\n"
+     "    ios_proc_sockets[idx].fd = fd;\n"
+     "    ios_proc_sockets[idx].exiting = FALSE;\n"
+     "    __sync_synchronize();\n"
+     "    ios_proc_sockets[idx].peb = peb_id;\n"
+     "    if (idx == ios_proc_socket_count) __atomic_store_n( &ios_proc_socket_count, idx + 1, __ATOMIC_RELEASE );\n"
+     "    pthread_mutex_unlock( &lock );\n"
+     "}\n"),
+    # Wine's mutex_lock()/mutex_unlock() (unix_private.h) do nothing once the global
+    # process_exiting is set, which NtTerminateProcess does for the process exiting. Here that
+    # global is the exit flag of the session's first program only (every other process has its
+    # own, ios_proc_sockets[].exiting), so once the first program ended (Steins;Gate's launcher a
+    # few seconds in, or the first game), every later program ran with no unix-side lock at all:
+    # fd_cache_mutex, virtual_mutex, ... (build 173: two Stick Fight threads received each other's
+    # fds, "HANDLE MISMATCH asked 0x46c got 0x468", and the assert ended the game). With session
+    # reuse the first program gets an exit flag of its own too.
+    ("BOOL *ios_process_exiting_ptr(void)\n"
+     "{\n"
+     "    int i = ios_proc_socket_index();\n"
+     "    return (i >= 0) ? &ios_proc_sockets[i].exiting : &process_exiting;\n"
+     "}\n",
+     "BOOL *ios_process_exiting_ptr(void)\n"
+     "{\n"
+     "    static BOOL first_program_exiting;   " + MARK + "\n"
+     "    const char *reuse = getenv( \"PocketGamesNoJ_SESSION_REUSE\" );\n"
+     "    int i = ios_proc_socket_index();\n"
+     "    if (i >= 0) return &ios_proc_sockets[i].exiting;\n"
+     "    /* the global would turn off every lock of every later program (mutex_lock) */\n"
+     "    return (reuse && reuse[0] == '1') ? &first_program_exiting : &process_exiting;\n"
+     "}\n"),
+    # The session's first program: its socket number is free once closed, and may be another
+    # process's socket by the time a late thread of this one calls the exit path again.
+    ("        if (wine_launched_process_did_exit) wine_launched_process_did_exit( status );\n"
+     "        close( fd_socket );\n",
+     "        if (wine_launched_process_did_exit) wine_launched_process_did_exit( status );\n"
+     "        if (fd_socket >= 0) close( fd_socket );\n"
+     "        fd_socket = -1;   " + MARK + "\n"),
+    # A killed main thread ends its process (KILLED_FIXES has the call).
+    ('    wine_log_write("[Wine ntdll/server] process_exit_wrapper(%d)", status );\n'
+     "    exit( status );  /* on iOS, wine_ios_exit shim longjmps back to wine_process_thread */\n"
+     "}\n",
+     '    wine_log_write("[Wine ntdll/server] process_exit_wrapper(%d)", status );\n'
+     "    exit( status );  /* on iOS, wine_ios_exit shim longjmps back to wine_process_thread */\n"
+     "}\n"
+     r'''
+#ifdef WINE_IOS
+/* PocketGamesNoJ session-reuse (engine/wine/patches/session_reuse.py): the server killed this process
+ * (a parent's TerminateProcess, the app's Force quit) while its main thread waited for it.
+ * abort_thread() ended that thread alone (pthread_exit), so the boot thread never got back to its
+ * setjmp: the process's slot, socket and guest window stayed taken and the app never learnt that
+ * the program had ended. The main thread ends the process instead, as exit_process() does. Its
+ * requests fail from here on instead of ending the thread (the deferred-abort state of a section,
+ * above): the server has let go of it, and process_exit_wrapper() only closes and releases what
+ * this side holds. */
+void pocketgamesnoj_main_thread_killed( int status )
+{
+    static _Thread_local int dying;
+    static int logged;
+    const char *reuse = getenv( "PocketGamesNoJ_SESSION_REUSE" );
+
+    if (!reuse || reuse[0] != '1') return;
+    if (!wine_ios_exit_initialized || !pthread_equal( pthread_self(), wine_ios_main_thread )) return;
+    if (dying++) return;   /* the exit path itself was cut short: the thread just ends */
+    ios_section_set_state( IOS_SECTION_ABORT | IOS_SECTION_EXITING | 1 );
+    if (__sync_fetch_and_add( &logged, 1 ) < 16)
+        dprintf( 2, "[session-reuse] the main thread of process %04x was killed (status %#x): the process "
+                    "ends through its exit path\n", (unsigned int)GetCurrentProcessId(), (unsigned int)status );
+    process_exit_wrapper( status ? status : 1 );
+}
+#endif
+'''),
+]
+
+KILLED_FIXES = [
+    ("void abort_thread( int status )\n"
+     "{\n"
+     "    pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );\n",
+     "void abort_thread( int status )\n"
+     "{\n"
+     "    pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );\n"
+     "    {   " + MARK + "\n"
+     "        extern void pocketgamesnoj_main_thread_killed( int status );\n"
+     "        pocketgamesnoj_main_thread_killed( status );   /* a pseudo-process's main thread: its process ends */\n"
+     "    }\n"),
+    # exit_thread() joins and frees the TEB of the thread that exited before it, kept in one static
+    # for every pseudo-process. The second Game.exe's first exiting thread got the first Game.exe's
+    # last TEB: build 162 freed it into the new process's TEB block, so a later thread of the new
+    # game got a TEB in the old window (its x86 stack then went wrong, log 96); with the old window
+    # torn down (builds 163-166) the read faulted until Madeira ended the app (crash log 9,
+    # exit_thread+0x88 reading 0x72002f03a0). The TEB is a global the window teardown can clear,
+    # and only a TEB of the same process is joined and freed.
+    ("static DECLSPEC_NORETURN void exit_thread( int status )\n"
+     "{\n"
+     "    static void *prev_teb;\n"
+     "    TEB *teb;\n",
+     "void *ios_exit_prev_teb;   /* PocketGamesNoJ session-reuse: exit_thread's, cleared by a window teardown */\n"
+     "\n"
+     "static DECLSPEC_NORETURN void exit_thread( int status )\n"
+     "{\n"
+     "    TEB *teb;\n"),
+    ("    if ((teb = InterlockedExchangePointer( &prev_teb, NtCurrentTeb() )))\n",
+     "    if ((teb = InterlockedExchangePointer( &ios_exit_prev_teb, NtCurrentTeb() )) &&\n"
+     "        teb->Peb == NtCurrentTeb()->Peb)   /* another process's TEB is that process's */\n"),
+]
+
+
+# The threads an exited process leaves asleep. A process ends (ExitProcess, TerminateProcess) by
+# the server killing its threads; a thread learns it from its next server request (the pipe is
+# closed) and exits there. DXMT's encode, finish and other worker threads sleep in address waits
+# (NtWaitForAlertByThreadId) or delays that never ask the server, so they stayed (6 per D3D game,
+# build 159), their TEBs inside the guest window, and Madeira keeps a window while a thread of it
+# lives (ios_thread_registry_range_busy): its gigabytes never came back. pocketgamesnoj_reap_alert()
+# wakes such a thread and moves a generation; a thread that sees a new generation when it wakes
+# or enters a wait asks the server about itself, and a killed one exits right there (abort_thread)
+# as at any request.
+REAP_HELPERS = MARK + r'''
+/* PocketGamesNoJ session-reuse (engine/wine/patches/session_reuse.py): see pocketgamesnoj_reap_range()
+ * (signal_arm64_ios.c) and pocketgamesnoj_kill_programs() (the wineserver's process.c). */
+volatile LONG pocketgamesnoj_reap_gen;
+static __thread LONG pocketgamesnoj_reap_seen;
+
+void pocketgamesnoj_reap_alert( unsigned int tid )
+{
+    InterlockedIncrement( &pocketgamesnoj_reap_gen );
+    NtAlertThreadByThreadId( ULongToHandle( tid ) );
+}
+
+/* A new generation since this thread last looked: is it still alive? A killed thread's request
+ * finds its pipe closed and the thread exits in send_request (abort_thread). */
+static void pocketgamesnoj_reap_check(void)
+{
+    LONG gen = pocketgamesnoj_reap_gen;
+
+    if (gen == pocketgamesnoj_reap_seen) return;
+    pocketgamesnoj_reap_seen = gen;
+    SERVER_START_REQ( get_thread_info )
+    {
+        req->handle = wine_server_obj_handle( GetCurrentThread() );
+        req->access = THREAD_QUERY_LIMITED_INFORMATION;
+        wine_server_call( req );
+    }
+    SERVER_END_REQ;
+}
+
+'''
+
+REAP_SYNC_FIXES = [
+    ("/******************************************************************\n"
+     " *\t\tNtDelayExecution (NTDLL.@)\n"
+     " */\n"
+     "NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )\n"
+     "{\n"
+     "    unsigned int status = STATUS_SUCCESS;\n"
+     "\n"
+     "    IOS_ECO_POLL();   /* ml1133 */\n",
+     REAP_HELPERS +
+     "/******************************************************************\n"
+     " *\t\tNtDelayExecution (NTDLL.@)\n"
+     " */\n"
+     "NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )\n"
+     "{\n"
+     "    unsigned int status = STATUS_SUCCESS;\n"
+     "\n"
+     "    IOS_ECO_POLL();   /* ml1133 */\n"
+     "    pocketgamesnoj_reap_check();   /* PocketGamesNoJ session-reuse */\n"),
+    ("    IOS_ECO_POLL();   /* ml1133 */\n"
+     "    __sync_fetch_and_add( &ios_alert_waits, 1 );   /* ml1115 */\n",
+     "    IOS_ECO_POLL();   /* ml1133 */\n"
+     "    __sync_fetch_and_add( &ios_alert_waits, 1 );   /* ml1115 */\n"
+     "    pocketgamesnoj_reap_check();   /* PocketGamesNoJ session-reuse */\n"),
+    ("        if (ios_wslot >= 0) ios_alert_waiters[ios_wslot].addr = NULL;\n"
+     "        if (ios_marked && ios_alert_unix_n < 120) { InterlockedIncrement( &ios_alert_unix_n );\n"
+     "            ERR( \"[alert-unix] tid=%04x -> ALERTED\\n\",\n",
+     "        if (ios_wslot >= 0) ios_alert_waiters[ios_wslot].addr = NULL;\n"
+     "        pocketgamesnoj_reap_check();   /* PocketGamesNoJ session-reuse: woken to end? */\n"
+     "        if (ios_marked && ios_alert_unix_n < 120) { InterlockedIncrement( &ios_alert_unix_n );\n"
+     "            ERR( \"[alert-unix] tid=%04x -> ALERTED\\n\",\n"),
+]
+
+# The reaper (build/ntdll-unix/signal_arm64_ios.c, next to the thread registry it walks).
+REAP_SIGNAL_FIXES = [
+    ("static int ios_lookup_thread(thread_t mach_thread, uintptr_t *teb_out, void **tramp_out)\n",
+     MARK + r'''
+/* PocketGamesNoJ session-reuse (engine/wine/patches/session_reuse.py): end the threads an exited
+ * process left asleep in its guest window, so the window can be torn down. With
+ * PocketGamesNoJ_SESSION_REUSE=1 only; called by the window reclaim (virtual_ios.c) for a window whose
+ * owner has exited.
+ *
+ * First every such thread is woken (pocketgamesnoj_reap_alert, sync.c): one asleep in an address wait
+ * or a delay then asks the server about itself and, killed with its process, exits through
+ * Wine's own path. What is left after half a second sleeps where no alert reaches it (DXMT's
+ * shared-event listener runs a CFRunLoop in mach_msg): a thread suspended inside a system call
+ * holds no lock of this side, so its server pipes are closed and the thread is terminated.
+ * A thread running anything else is left alone, and keeps the window as before. */
+static int pocketgamesnoj_thread_alive( thread_t port )
+{
+    struct thread_basic_info info;
+    mach_msg_type_number_t length = THREAD_BASIC_INFO_COUNT;
+    kern_return_t kr = thread_info( port, THREAD_BASIC_INFO, (thread_info_t)&info, &length );
+
+    return kr != KERN_INVALID_ARGUMENT && kr != MACH_SEND_INVALID_DEST && kr != KERN_TERMINATED;
+}
+
+int pocketgamesnoj_reap_range( uintptr_t base, uintptr_t size )
+{
+    extern void pocketgamesnoj_reap_alert( unsigned int tid );
+    extern void ios_thread_died( unsigned tid );
+    const char *reuse = getenv( "PocketGamesNoJ_SESSION_REUSE" );
+    int count = ios_thread_registry_count(), i, wait, woken = 0, stopped = 0, parked = 0, left = 0;
+    mach_port_t self;
+
+    if (!reuse || reuse[0] != '1') return 0;
+    self = mach_thread_self();
+    for (i = 0; i < count; i++)
+    {
+        uintptr_t teb = ios_thread_registry[i].teb;
+        thread_t port = ios_thread_registry[i].mach_thread;
+
+        if (!port || port == self || !teb || teb < base || teb - base >= size) continue;
+        if (!pocketgamesnoj_thread_alive( port )) continue;
+        pocketgamesnoj_reap_alert( (unsigned int)(ULONG_PTR)((TEB *)teb)->ClientId.UniqueThread );
+        woken++;
+    }
+    for (wait = 0; woken && wait < 50 && ios_thread_registry_range_busy( base, size ); wait++) usleep( 10000 );
+    for (i = 0; woken && i < count; i++)
+    {
+        uintptr_t teb = ios_thread_registry[i].teb;
+        thread_t port = ios_thread_registry[i].mach_thread;
+        struct ntdll_thread_data *td;
+        arm_thread_state64_t st;
+        mach_msg_type_number_t cnt = ARM_THREAD_STATE64_COUNT;
+        struct thread_basic_info info;
+        mach_msg_type_number_t length = THREAD_BASIC_INFO_COUNT;
+        uint64_t pc = 0;
+        uint32_t insn = 0;
+        mach_vm_size_t got = 0;
+        unsigned int tid;
+        kern_return_t kr;
+
+        if (!port || port == self || !teb || teb < base || teb - base >= size) continue;
+        if (!pocketgamesnoj_thread_alive( port )) continue;
+        /* asleep before it is stopped: a suspended thread reports TH_STATE_STOPPED (build 161: the
+         * run-loop thread was left running for that reason) */
+        if (thread_info( port, THREAD_BASIC_INFO, (thread_info_t)&info, &length ) != KERN_SUCCESS ||
+            info.run_state != TH_STATE_WAITING) { left++; continue; }
+        if (thread_suspend( port ) != KERN_SUCCESS) { left++; continue; }
+        if (thread_get_state( port, ARM_THREAD_STATE64, (thread_state_t)&st, &cnt ) != KERN_SUCCESS ||
+            !(pc = arm_thread_state64_get_pc( st )) ||
+            mach_vm_read_overwrite( mach_task_self(), pc - 4, 4, (mach_vm_address_t)&insn, &got ) != KERN_SUCCESS ||
+            got != 4 || insn != 0xd4001001 /* svc #0x80: inside a system call */)
+        {
+            thread_resume( port );
+            dprintf( 2, "[session-reuse] a thread of an exited process (TEB %p) is not inside a system call "
+                        "(pc %#llx, instruction before it %08x): left running\n", (void *)teb,
+                     (unsigned long long)pc, insn );
+            left++;
+            continue;
+        }
+        td = (struct ntdll_thread_data *)&((TEB *)teb)->GdiTebBatch;
+        tid = (unsigned int)(ULONG_PTR)((TEB *)teb)->ClientId.UniqueThread;
+        if (td->request_fd > 2) close( td->request_fd );
+        if (td->reply_fd > 2) close( td->reply_fd );
+        if (td->wait_fd[0] > 2) close( td->wait_fd[0] );
+        if (td->wait_fd[1] > 2) close( td->wait_fd[1] );
+        if (td->alert_fd > 2) close( td->alert_fd );
+        td->request_fd = td->reply_fd = td->wait_fd[0] = td->wait_fd[1] = td->alert_fd = -1;
+        if ((kr = thread_terminate( port )) != KERN_SUCCESS)
+        {
+            /* iOS does not terminate a pthread from another thread (build 162: the run-loop thread
+             * was refused). It stays suspended for good instead: asleep inside a system call it
+             * holds nothing of this side, and suspended it never runs again, so it no longer counts
+             * as the window's (ios_thread_registry_range_busy). */
+            ios_thread_registry[i].mach_thread = 0;
+            __sync_synchronize();
+            ios_thread_registry[i].teb = 0;
+            ios_thread_registry[i].trampoline = NULL;
+            dprintf( 2, "[session-reuse] thread %04x of an exited process: not terminated (%d), kept suspended\n",
+                     tid, (int)kr );
+            parked++;
+        }
+        else stopped++;
+        ios_thread_died( tid );
+    }
+    /* a woken thread may still be on its way out (pthread_exit) */
+    for (wait = 0; woken && wait < 30 && ios_thread_registry_range_busy( base, size ); wait++) usleep( 10000 );
+    mach_port_deallocate( mach_task_self(), self );
+    if (woken)
+        dprintf( 2, "[session-reuse] window B=%p: %d thread(s) the exited process left were woken to end "
+                    "themselves, %d asleep for good were stopped, %d kept suspended, %d still run there\n",
+                 (void *)base, woken, stopped, parked, left );
+    return woken;
+}
+
+static int ios_lookup_thread(thread_t mach_thread, uintptr_t *teb_out, void **tramp_out)
+'''),
+]
+
+# Wine's iOS audio driver (build/ntdll-unix/audio_null_ios.c) has one RemoteIO endpoint for the app,
+# kept "for the process lifetime" because creating and releasing it churned Apple's caulk into a
+# trap; it is still stopped whenever no client plays and started again for the next one. With
+# session reuse that is every game: the last game's stream goes, the endpoint stops, the next game
+# starts it. Build 163: the second Forager's audio thread waited forever for its first buffer
+# event (the timer signals only as the device consumes), and the app died without a trace as the
+# second Game.exe brought its audio up. The endpoint now keeps running in a kept session once it
+# has run, and a started client whose endpoint is not running gets the null-mode 10 ms beat
+# instead of waiting for a consumer that never comes.
+AUDIO_FIXES = [
+    ("static void ios_dev_stop_if_idle(void)\n"
+     "{\n"
+     "    int i, any = 0;\n"
+     "\n"
+     "    pthread_mutex_lock(&g_dev_lock);\n",
+     "static void ios_dev_stop_if_idle(void)\n"
+     "{\n"
+     "    int i, any = 0;\n"
+     "\n"
+     "    {   " + MARK + "\n"
+     "        const char *reuse = getenv(\"PocketGamesNoJ_SESSION_REUSE\");\n"
+     "        if (reuse && reuse[0] == '1') return;   /* the next game plays through it as it is */\n"
+     "    }\n"
+     "    pthread_mutex_lock(&g_dev_lock);\n"),
+    ("    return s->mixable && g_dev.au != NULL;\n",
+     "    /* PocketGamesNoJ: a started client of an endpoint that is not running is driven by the wall clock */\n"
+     "    return s->mixable && g_dev.au != NULL && !(s->started && !g_dev.running);\n"),
+    # Diagnostics for the [quit-watch] report (App/Sources/Native/fxi_wow_host.c): the endpoint and
+    # every registered and mixed stream. Build 164: the second Forager's audio thread still waited
+    # for its first buffer event, and the driver logged nothing about that stream.
+    ("    ios_wow64_midi_notify_wait,        /* midi_notify_wait */\n"
+     "    ios_wow64_aux_message,             /* aux_message */\n"
+     "};\n",
+     "    ios_wow64_midi_notify_wait,        /* midi_notify_wait */\n"
+     "    ios_wow64_aux_message,             /* aux_message */\n"
+     "};\n" + r'''
+/* PocketGamesNoJ session-reuse (engine/wine/patches/session_reuse.py): the driver's state, for the
+ * app's [quit-watch] report. Read without the stream lock (a report, not a decision). */
+void pocketgamesnoj_audio_report(void)
+{
+    extern void mid_log(const char *fmt, ...);
+    int i;
+
+    mid_log("[audio] endpoint au=%p running=%d failed=%d rate=%u ch=%u passes=%llu",
+            (void *)g_dev.au, g_dev.running, g_dev.failed, g_dev.rate, g_dev.channels,
+            (unsigned long long)atomic_load_explicit(&g_dev.cb_epoch, memory_order_relaxed));
+    for (i = 0; i < IOS_MAX_STREAMS; i++)
+    {
+        struct ios_stream *s = g_streams[i], *m = atomic_load_explicit(&g_mix[i], memory_order_relaxed);
+        if (s)
+            mid_log("[audio]   stream slot %d %p: valid=%d started=%d mixable=%d live=%d event=%p rate=%u ch=%u "
+                    "buffer=%u frames, written %llu, played %llu, cbs %u",
+                    i, (void *)s, s->valid, s->started, s->mixable, ios_stream_is_live(s), s->event,
+                    s->sample_rate, s->channels, s->buffer_frames,
+                    (unsigned long long)atomic_load_explicit(&s->write_pos, memory_order_relaxed),
+                    (unsigned long long)atomic_load_explicit(&s->play_pos, memory_order_relaxed),
+                    atomic_load_explicit(&s->st_cbs, memory_order_relaxed));
+        if (m) mid_log("[audio]   mixer slot %d: stream %p", i, (void *)m);
+    }
+}
+'''),
+]
+
+# The reclaim (build/ntdll-unix/virtual_ios.c) asks the reaper before keeping a window for its
+# live threads.
+REAP_VIRTUAL_FIXES = [
+    ("            if ((!env || strcmp( env, \"0\" )) &&\n"
+     "                ios_thread_registry_range_busy( base, IOS_WOW_WINDOW_SIZE ))\n",
+     "            extern int pocketgamesnoj_reap_range( uintptr_t base, uintptr_t size );   " + MARK + "\n"
+     "            if ((!env || strcmp( env, \"0\" )) &&\n"
+     "                ios_thread_registry_range_busy( base, IOS_WOW_WINDOW_SIZE ) &&\n"
+     "                (!pocketgamesnoj_reap_range( base, IOS_WOW_WINDOW_SIZE ) ||\n"
+     "                 ios_thread_registry_range_busy( base, IOS_WOW_WINDOW_SIZE )))\n"),
+    # exit_thread()'s last exited TEB must not point into the window about to go (thread_ios.c).
+    ("        d3d9_native_window_teardown( (unsigned long)base );\n",
+     "        {   /* PocketGamesNoJ session-reuse */\n"
+     "            extern void *ios_exit_prev_teb;\n"
+     "            void *last = ios_exit_prev_teb;\n"
+     "            if (last && (ULONG_PTR)last - base < IOS_WOW_WINDOW_SIZE)\n"
+     "                __sync_bool_compare_and_swap( &ios_exit_prev_teb, last, NULL );\n"
+     "        }\n"
+     "        {   /* PocketGamesNoJ: the Metal textures and buffers it left (engine/dxmt/patches/metal_owner.py) */\n"
+     "            extern void winemetal_release_window( unsigned long base ) __attribute__((weak));\n"
+     "            if (winemetal_release_window) winemetal_release_window( (unsigned long)base );\n"
+     "        }\n"
+     "        d3d9_native_window_teardown( (unsigned long)base );\n"),
+]
+
+
+# The app's Force quit (the wineserver, on its own thread): every program of the session ends as
+# TerminateProcess ends it (wine/server/process.c), asked through a flag the server loop reads
+# (build/wineserver/request_ios.c, fd_ios.c), as the app hands it a new client socket. The
+# programs' threads that sleep where no server reply reaches them are woken to find out
+# (pocketgamesnoj_reap_alert); a killed main thread ends its process (pocketgamesnoj_main_thread_killed).
+FORCE_PROCESS_FIXES = [
+    ("/* kill all processes */\n"
+     "static void kill_all_processes(void)\n",
+     MARK + r'''
+/* PocketGamesNoJ session-reuse (engine/wine/patches/session_reuse.py): the app's Force quit. Every
+ * program of the session (not a system process) is terminated as TerminateProcess terminates it;
+ * then its threads are woken, so one asleep where no server reply reaches it learns it was killed
+ * (ntdll's sync.c). Runs on the server thread, from the main loop (fd_ios.c). */
+extern void pocketgamesnoj_reap_alert( unsigned int tid );
+int pocketgamesnoj_kill_programs( int exit_code )
+{
+    struct process *process, *victims[32];
+    struct thread *thread;
+    unsigned int tids[512];
+    int n = 0, nt = 0, i;
+
+    LIST_FOR_EACH_ENTRY( process, &process_list, struct process, entry )
+    {
+        if (process->is_system || !process->running_threads || n >= 32) continue;
+        victims[n++] = (struct process *)grab_object( process );
+        LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
+            if (nt < 512) tids[nt++] = thread->id;
+    }
+    for (i = 0; i < n; i++)
+    {
+        terminate_process( victims[i], NULL, exit_code );
+        release_object( victims[i] );
+    }
+    for (i = 0; i < nt; i++) pocketgamesnoj_reap_alert( tids[i] );
+    return n;
+}
+
+/* kill all processes */
+static void kill_all_processes(void)
+'''),
+]
+
+FORCE_REQUEST_FIXES = [
+    ("    ws_log(\"[wineserver] inject_client_fd: fd=%d\", fd);\n"
+     "    g_injected_client_fd = fd;\n"
+     "}\n",
+     "    ws_log(\"[wineserver] inject_client_fd: fd=%d\", fd);\n"
+     "    g_injected_client_fd = fd;\n"
+     "}\n"
+     "\n" + MARK + "\n"
+     "/* The app's Force quit (engine/wine/patches/session_reuse.py): the server loop ends every\n"
+     " * program of the session (pocketgamesnoj_kill_programs, process.c) on its own thread. */\n"
+     "volatile int g_pocketgamesnoj_kill_programs = -1;\n"
+     "volatile int g_pocketgamesnoj_force_quits;   /* how many: the bridge stops waiting for a stuck child */\n"
+     "void wineserver_kill_programs(int exit_code)\n"
+     "{\n"
+     "    extern void ios_wineserver_wake(void);\n"
+     "    ws_log(\"[wineserver] kill_programs: exit code %d (the app's Force quit)\", exit_code);\n"
+     "    __atomic_add_fetch( &g_pocketgamesnoj_force_quits, 1, __ATOMIC_SEQ_CST );\n"
+     "    g_pocketgamesnoj_kill_programs = exit_code;\n"
+     "    ios_wineserver_wake();\n"
+     "}\n"),
+]
+
+# A thread that ends itself (NtTerminateThread on itself: the reply says "self", the thread then
+# leaves through exit_thread) is dead for the server once its request pipe closes (thread.c,
+# thread_poll_event / read_request). From the second program of a kept session on, threads that
+# ended this way stayed alive here (logs of 2026-10-14): in every later Steins;Gate, Bink's six
+# async threads ran NtTerminateThread and freed the previous exiting thread's stacks, and the
+# server never saw their pipes close, so BinkWaitStopAsyncThreadsMulti waited on their handles for
+# good (Force quit found the six still alive); Forager after another game waited on its start
+# thread's handle the same way. 250 ms after such a reply a thread the server still has is ended
+# as that close would have ended it, and the line says what had become of its pipe.
+SELF_EXIT_FIXES = [
+    ("/* terminate a thread */\n"
+     "DECL_HANDLER(terminate_thread)\n",
+     MARK + r'''
+/* PocketGamesNoJ session-reuse (engine/wine/patches/session_reuse.py): a thread that ended itself and
+ * whose request pipe never closed here is ended 250 ms after its NtTerminateThread. */
+static void pocketgamesnoj_self_exit_timeout( void *private )
+{
+    struct thread *thread = private;
+
+    if (thread->state != TERMINATED)
+    {
+        int fd = thread->request_fd ? get_unix_fd( thread->request_fd ) : -1;
+        struct pollfd pfd = { fd, POLLIN, 0 };
+        const char *what = fd < 0 ? "no fd" :
+                           poll( &pfd, 1, 0 ) < 0 || (pfd.revents & POLLNVAL) ? "no longer open here" :
+                           (pfd.revents & POLLHUP) ? "closed by the thread, and the server's poll missed it" :
+                           "still open at the thread's end";
+        fprintf( stderr, "[session-reuse] thread %04x of process %04x ended itself 0.25 s ago, but its request "
+                 "pipe (server fd %d: %s) never closed: the server ends it\n",
+                 thread->id, thread->process->id, fd, what );
+        kill_thread( thread, 0 );
+    }
+    release_object( thread );
+}
+
+static void pocketgamesnoj_watch_self_exit( struct thread *thread )
+{
+    const char *reuse = getenv( "PocketGamesNoJ_SESSION_REUSE" );
+
+    if (reuse && reuse[0] == '1')
+        add_timeout_user( -TICKS_PER_SEC / 4, pocketgamesnoj_self_exit_timeout, grab_object( thread ) );
+}
+
+/* terminate a thread */
+DECL_HANDLER(terminate_thread)
+'''),
+    ("        if (thread != current) kill_thread( thread, 1 );\n"
+     "        else reply->self = 1;\n"
+     "        cancel_terminating_thread_asyncs( thread );\n",
+     "        if (thread != current) kill_thread( thread, 1 );\n"
+     "        else\n"
+     "        {\n"
+     "            reply->self = 1;\n"
+     "            pocketgamesnoj_watch_self_exit( thread );   /* PocketGamesNoJ session-reuse */\n"
+     "        }\n"
+     "        cancel_terminating_thread_asyncs( thread );\n"),
+]
+
+FORCE_FD_FIXES = [
+    ("            /* Check for injected client fd (socketpair bypass) */\n",
+     "            {   " + MARK + "   /* the app's Force quit (wineserver_kill_programs) */\n"
+     "                extern volatile int g_pocketgamesnoj_kill_programs;\n"
+     "                extern int pocketgamesnoj_kill_programs( int exit_code );\n"
+     "                int code = __atomic_exchange_n( &g_pocketgamesnoj_kill_programs, -1, __ATOMIC_SEQ_CST );\n"
+     "                if (code >= 0)\n"
+     "                    ws_log( \"[wineserver] force quit: %d program process(es) terminated\",\n"
+     "                            pocketgamesnoj_kill_programs( code ) );\n"
+     "            }\n"
+     "            /* Check for injected client fd (socketpair bypass) */\n"),
+]
+
+
+# Diagnostics (win32u's build/win32u-unix/class_ios.c, from build-unix.sh): Forager started as the
+# second program of a kept session (build 156) dispatched a message to a window procedure that is
+# 0x3c in its guest window. Every window procedure allocated in win32u's session-wide table (index,
+# value, process, caller), and every dispatch whose procedure converts to a guest address below
+# 64 KB (never code), are logged as [winproc] lines, 300 per run.
+WIN32U_HELPER = MARK + r'''
+extern ULONG_PTR ios_wow_base(void);
+extern void mid_log( const char *fmt, ... );   /* the app's log (App/Sources/Native/runtime_support.c): not through madeira-log.txt */
+static unsigned int pocketgamesnoj_winproc_lines;
+static void pocketgamesnoj_winproc_note( const WINDOWPROC *proc, WNDPROC func, BOOL ansi, void *caller )
+{
+    if (__atomic_fetch_add( &pocketgamesnoj_winproc_lines, 1, __ATOMIC_RELAXED ) >= 300) return;
+    mid_log( "[winproc] new %#x %c %p (peb %p, B %#lx, caller %p)",
+             (unsigned int)(proc - winproc_array), ansi ? 'A' : 'W', func, NtCurrentTeb()->Peb,
+             (unsigned long)ios_wow_base(), caller );
+}
+
+'''
+
+WIN32U_FIXES = [
+    ("static inline WINDOWPROC *alloc_winproc_ptr( WNDPROC func, BOOL ansi )\n",
+     WIN32U_HELPER + "static inline WINDOWPROC *alloc_winproc_ptr( WNDPROC func, BOOL ansi )\n"),
+    ("            if (ansi) proc->procA = func;\n"
+     "            else proc->procW = func;\n"
+     "            TRACE_(win)( \"allocated %p for %c %p (%d/%d used)\\n\",\n",
+     "            if (ansi) proc->procA = func;\n"
+     "            else proc->procW = func;\n"
+     "            pocketgamesnoj_winproc_note( proc, func, ansi, __builtin_return_address( 0 ) );\n"
+     "            TRACE_(win)( \"allocated %p for %c %p (%d/%d used)\\n\",\n"),
+    ("    if (!params->procA) params->procA = params->func;\n"
+     "    if (!params->procW) params->procW = params->func;\n"
+     "}\n",
+     "    if (!params->procA) params->procA = params->func;\n"
+     "    if (!params->procW) params->procW = params->func;\n"
+     "    {   /* PocketGamesNoJ diagnostics: a 32-bit program's procedure below 64 KB is never code */\n"
+     "        ULONG_PTR b = ios_wow_base();\n"
+     "        ULONG a = (ULONG)(ULONG_PTR)params->procA, w = (ULONG)(ULONG_PTR)params->procW;\n"
+     "        if (b && ((params->procA && a < 0x10000) || (params->procW && w < 0x10000)) &&\n"
+     "            __atomic_fetch_add( &pocketgamesnoj_winproc_lines, 1, __ATOMIC_RELAXED ) < 300)\n"
+     "        {\n"
+     "            WINDOWPROC *p = get_winproc_ptr( params->func );\n"
+     "            int idx = (p && p != WINPROC_PROC16) ? (int)(p - winproc_array) : -1;\n"
+     "            mid_log( \"[winproc] BAD hwnd %p msg %#x func %p -> A %p W %p ansi %d ansi_dst %d \"\n"
+     "                     \"entry %d (A %p W %p) used %u peb %p own-builtins %d B %#lx\",\n"
+     "                     params->hwnd, params->msg, params->func, params->procA, params->procW,\n"
+     "                     params->ansi, params->ansi_dst, idx, idx >= 0 ? p->procA : NULL,\n"
+     "                     idx >= 0 ? p->procW : NULL, winproc_used, NtCurrentTeb()->Peb,\n"
+     "                     ios_client_procs_for_peb() != NULL, (unsigned long)b );\n"
+     "        }\n"
+     "    }\n"
+     "}\n"),
+]
+
+
+# The fix (Wine's dlls/win32u/window.c, from build-unix.sh): win32u keeps one client object (the
+# WND) per user handle index, client_objects[], per process in Wine and shared by every
+# pseudo-process here, and takes the slot as this window's once the session's shared handle table
+# says the window belongs to this process. A window the wineserver itself made for this process
+# (its desktop and message windows, made for a process without them) has no client object, and its
+# index was usually an exited process's window: the slot still held that process's WND, freed or
+# not. Forager's second start in a kept session (build 158) dispatched WM_PARENTNOTIFY to its
+# message window through such a WND and called its window procedure, 0x3c. A WND is the window's
+# only if its own handle is the window's full handle (generation included); otherwise the window
+# has no client object here, as in Wine.
+WINDOW_FIXES = [
+    ("    else ptr = client_objects[index];\n",
+     "    else ptr = client_objects[index];\n"
+     "    " + MARK + "\n"
+     "    if (ptr && ptr != OBJ_OTHER_PROCESS && type == NTUSER_OBJ_WINDOW && ((WND *)ptr)->handle != handle)\n"
+     "        ptr = NULL;   /* another (exited) process's WND in this index's slot */\n"),
+    ("        if (tid != -1 && entry.tid != tid) continue;\n",
+     "        if (tid != -1 && entry.tid != tid) continue;\n"
+     "        if (type == NTUSER_OBJ_WINDOW && client_objects[i] &&\n"
+     "            ((WND *)client_objects[i])->handle != *handle) continue;   /* PocketGamesNoJ: another process's WND */\n"),
+]
+
+
+def apply(path, fixes, what):
+    s = open(path).read()
+    if MARK in s:
+        print("session_reuse (%s): already applied" % what)
+        return
+    for old, new in fixes:
+        if s.count(old) != 1:
+            sys.exit("session_reuse.py (%s): anchor found %d times: %r" % (what, s.count(old), old[:70]))
+        s = s.replace(old, new)
+    open(path, "w").write(s)
+    print("session_reuse (%s): applied to %s" % (what, path))
+
+
+def main():
+    root, what = sys.argv[1], sys.argv[2]
+    if what == "app":
+        apply(root + "/app/Madeira/WineProcessBridge.m", APP_FIXES, what)
+    elif what == "ntdll":
+        apply(root + "/build/ntdll-unix/server_ios.c", NTDLL_FIXES, what)
+        apply(root + "/build/ntdll-unix/thread_ios.c", KILLED_FIXES, what + " thread_ios.c")
+        apply(root + "/wine/dlls/ntdll/unix/sync.c", REAP_SYNC_FIXES, what + " sync.c")
+        apply(root + "/build/ntdll-unix/signal_arm64_ios.c", REAP_SIGNAL_FIXES, what + " signal_arm64_ios.c")
+        apply(root + "/build/ntdll-unix/virtual_ios.c", REAP_VIRTUAL_FIXES, what + " virtual_ios.c")
+        apply(root + "/build/ntdll-unix/audio_null_ios.c", AUDIO_FIXES, what + " audio_null_ios.c")
+    elif what == "server":
+        apply(root + "/wine/server/process.c", FORCE_PROCESS_FIXES, what + " process.c")
+        apply(root + "/build/wineserver/request_ios.c", FORCE_REQUEST_FIXES, what + " request_ios.c")
+        apply(root + "/build/wineserver/fd_ios.c", FORCE_FD_FIXES, what + " fd_ios.c")
+        apply(root + "/wine/server/thread.c", SELF_EXIT_FIXES, what + " thread.c")
+    elif what == "win32u":
+        apply(root + "/build/win32u-unix/class_ios.c", WIN32U_FIXES, what)
+        apply(root + "/wine/dlls/win32u/window.c", WINDOW_FIXES, what + " window.c")
+    else:
+        sys.exit("usage: session_reuse.py <madeira checkout> app|ntdll|server|win32u")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import Foundation
+import SwiftUI
+
+/// Offers the log for sharing after something went wrong:
+/// - the app itself ended while in the foreground (a crash, or iOS killing it
+///   for memory): detected at the next launch by a marker file that is only
+///   removed when the app goes to the background; that session's log is kept
+///   as pocketgamesnoj-crash-log.txt before the new session truncates the log;
+/// - a Windows program ended with an error (WineController.watch).
+final class CrashReporter: ObservableObject {
+    static let shared = CrashReporter()
+
+    struct Report: Identifiable {
+        let id = UUID()
+        let title: String
+        let detail: String
+        let file: URL
+    }
+
+    @Published var report: Report?
+
+    private static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
+    private static var marker: URL { docs.appendingPathComponent(".pocketgamesnoj-session-active") }
+    static var crashLogURL: URL { docs.appendingPathComponent("pocketgamesnoj-crash-log.txt") }
+    static var interpreterTraceURL: URL { docs.appendingPathComponent("pocketgamesnoj-interpreter-trace.txt") }
+
+    /// Called by LogStore before it truncates the log. Returns true when the
+    /// previous session ended unexpectedly (its log is then preserved).
+    static func preservePreviousLogIfCrashed(log: URL) -> Bool {
+        let fm = FileManager.default
+        // Wine's interpreter trace (engine/wine/patches/nojit_dylib.py) is written straight to a file
+        // so it survives a crash; it belongs to the previous session only.
+        defer { try? fm.removeItem(at: interpreterTraceURL) }
+        guard fm.fileExists(atPath: marker.path) else { return false }
+        try? fm.removeItem(at: crashLogURL)
+        try? fm.copyItem(at: log, to: crashLogURL)
+        if let trace = try? Data(contentsOf: interpreterTraceURL), !trace.isEmpty,
+           let h = try? FileHandle(forWritingTo: crashLogURL) {
+            h.seekToEndOfFile()
+            h.write(Data("==== Wine interpreter trace (written directly, survives crashes) ====\n".utf8))
+            h.write(trace)
+            try? h.close()
+        }
+        // Wine's own log (the upstream port’s bridge points its stderr there): the app's log copies it with a
+        // follower, whose last lines die with the app. The file keeps them until the next Wine
+        // session starts, which is after this (wine_host.c follow_wine_log). Builds 163-165: the
+        // app ended while a second game started and the reason never reached the app's log.
+        let wineLog = docs.appendingPathComponent("wine-log.txt")
+        if let tail = try? FileHandle(forReadingFrom: wineLog), let h = try? FileHandle(forWritingTo: crashLogURL) {
+            let size = (try? tail.seekToEnd()) ?? 0
+            try? tail.seek(toOffset: size > 262_144 ? size - 262_144 : 0)
+            let data = (try? tail.readToEnd()) ?? Data()
+            h.seekToEndOfFile()
+            h.write(Data("==== Wine log tail (wine-log.txt, last \(data.count) bytes) ====\n".utf8))
+            h.write(data)
+            try? h.close()
+            try? tail.close()
+        }
+        try? fm.removeItem(at: marker)
+        return true
+    }
+
+    private var crashedLastTime = false
+    func noteCrashedLastTime() { crashedLastTime = true }
+
+    /// After launch: offer the previous session's log once.
+    func offerPreviousCrash() {
+        guard crashedLastTime else { return }
+        crashedLastTime = false
+        report = Report(title: "PocketGamesNoJ closed unexpectedly",
+                        detail: "The last session ended while the app was open (a crash, or iOS closing it for memory). Share its log so the bug can be fixed.",
+                        file: Self.crashLogURL)
+    }
+
+    /// A Windows program ended with an error.
+    func programCrashed(_ title: String, how: String) {
+        report = Report(title: "\(title) crashed",
+                        detail: "It \(how). Share the log so the bug can be fixed.",
+                        file: LogStore.shared.fileURL)
+    }
+
+    /// Quit game: Wine cannot stop a running Windows program (one session per
+    /// app run), so ending the game ends the app. Not reported as a crash.
+    func quitApp() {
+        dlog("[app] quit requested by the user")
+        sceneActive(false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }   // let the log line reach the file
+    }
+
+    /// Foreground: arm the marker. Background: a later exit is not a crash.
+    func sceneActive(_ active: Bool) {
+        if active {
+            FileManager.default.createFile(atPath: Self.marker.path, contents: Data())
+        } else {
+            try? FileManager.default.removeItem(at: Self.marker)
+        }
+    }
+}
+
+struct CrashReportSheet: View {
+    let report: CrashReporter.Report
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label(report.title, systemImage: "exclamationmark.triangle.fill")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.orange)
+            Text(report.detail).foregroundStyle(Deck.dim)
+            ShareLink(item: report.file) {
+                Label("Share log", systemImage: "square.and.arrow.up")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(DeckButtonStyle())
+            .padFocus("crash.share", radius: 20, preferred: true) { presentShare(report.file) }
+            Button("Not now") { dismiss() }
+                .frame(maxWidth: .infinity)
+                .padFocus("crash.dismiss", radius: 10) { dismiss() }
+            Spacer()
+        }
+        .padding(24)
+        .background(Deck.bg)
+        .presentationDetents([.medium])
+        .padScope("crash") { dismiss() }
+    }
+}

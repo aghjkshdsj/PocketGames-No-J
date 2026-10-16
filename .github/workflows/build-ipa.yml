@@ -1,0 +1,321 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    name: Host tests (Steam Cloud decisions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Swift toolchain
+        run: |
+          if ! command -v swiftc > /dev/null; then
+            curl -fsSL https://download.swift.org/swift-6.0.3-release/ubuntu2404/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-ubuntu24.04.tar.gz | tar -xz -C "$RUNNER_TEMP"
+            echo "$RUNNER_TEMP/swift-6.0.3-RELEASE-ubuntu24.04/usr/bin" >> "$GITHUB_PATH"
+          fi
+      - name: tests/host/run.sh
+        run: bash tests/host/run.sh "$RUNNER_TEMP/host-tests"
+
+  guests:
+    name: x86-64 guest programs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build hello + bench (static-PIE x86-64)
+        run: bash engine/guest/build.sh "$RUNNER_TEMP/guests"
+      - name: Cache llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/llvm-mingw
+          key: llvm-mingw-20260421-ucrt-ubuntu-x86_64
+      - name: No-JIT spike DLLs (ARM64EC + ARM64, 16 KB aligned)
+        id: spike
+        continue-on-error: true
+        run: bash engine/pedylib/build-spike.sh "$RUNNER_TEMP/guests/pedylib" "$RUNNER_TEMP/llvm-mingw"
+      - name: Spike result
+        if: steps.spike.outcome != 'success'
+        run: echo "::warning::The no-JIT spike DLLs did not build (see 'No-JIT spike DLLs'); this IPA has no DLL test."
+      - name: FXI static scan of the x64 test suite
+        if: steps.spike.outcome == 'success'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -qq clang > /dev/null
+          bash engine/fxi/build.sh "$RUNNER_TEMP/fxi" > /dev/null
+          "$RUNNER_TEMP/fxi/fxi" --scan-pe "$RUNNER_TEMP/guests/pedylib/winepe/suite-x64.exe" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: guests
+          path: ${{ runner.temp }}/guests
+
+  ios:
+    name: iOS interpreter app
+    needs: guests
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          brew install xcodegen ninja || true
+          cmake --version | head -1
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: guests
+          path: App/Generated
+
+      - name: Cache Blink build
+        uses: actions/cache@v4
+        with:
+          path: engine/blink/src
+          key: blink-src-${{ hashFiles('engine/blink/PIN') }}
+
+      - name: Build Blink interpreter for iOS (no-JIT path)
+        id: blink
+        continue-on-error: true
+        run: bash engine/blink/build-ios.sh
+
+      - name: Build without the interpreter
+        if: steps.blink.outcome != 'success'
+        run: |
+          echo "::warning::Blink did not build; this IPA has no no-JIT interpreter (see the 'Build Blink' log)."
+          git checkout -- Config/Blink.xcconfig
+          rm -f App/Generated/blink_version.h
+
+      - name: Stage Wine (stage 2) from the latest Wine unix build
+        id: wine
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(bash tools/latest-run.sh wine-unix.yml)
+          if [ -z "$RUN" ]; then echo "No successful Wine unix build yet"; exit 1; fi
+          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n wine-unix-libs -D engine/wine/out
+          bash engine/wine/stage-app.sh
+
+      - name: Audit Wine DLLs for the no-JIT scheme (signed dylibs)
+        if: steps.wine.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Step 5: the D3D/Metal DLLs rebuilt with 16 KB sections (dxmt-pe.yml) replace Madeira's
+          # 4 KB-aligned prebuilt ones, which cannot become signed dylibs.
+          D3D_RUN=$(bash tools/latest-run.sh dxmt-pe.yml || true)
+          if [ -n "$D3D_RUN" ] && gh run download "$D3D_RUN" -R "$GITHUB_REPOSITORY" -n d3d-pe-dlls -D "$RUNNER_TEMP/d3d-pe"; then
+            cp "$RUNNER_TEMP"/d3d-pe/*.dll engine/wine/madeira/app/Madeira/arm64ec-windows/
+            echo "- D3D DLLs: 16 KB-aligned rebuild from run $D3D_RUN ($(ls "$RUNNER_TEMP"/d3d-pe | tr '\n' ' '))" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          mkdir -p build
+          python3 engine/pedylib/pe2dylib.py audit engine/wine/madeira/app/Madeira/arm64ec-windows/*.dll \
+            --md "$GITHUB_STEP_SUMMARY" --json build/pe-audit.json | head -30
+          # The first real Wine DLL for the no-JIT test: ntdll (no imports), x18 rewritten.
+          mkdir -p App/Generated/pedylib
+          python3 engine/pedylib/pe2dylib.py convert engine/wine/madeira/app/Madeira/arm64ec-windows/ntdll.dll \
+            App/Generated/pedylib | tail -4
+          # No-JIT step B: every Wine PE file that fits the scheme becomes a signed dylib (PE/wine),
+          # named by file name as Wine looks it up. xtajit64 (FEX) is replaced by the stub emulator.
+          FARM=engine/wine/madeira/app/Madeira/arm64ec-windows
+          mkdir -p App/Generated/pedylib/wine
+          ok=0; skip=0
+          for f in "$FARM"/*; do
+            [ -f "$f" ] || continue
+            [ "$(basename "$f")" = xtajit64.dll ] && continue
+            if python3 engine/pedylib/pe2dylib.py convert --strict --keep-ext "$f" App/Generated/pedylib/wine > /dev/null 2>&1; then
+              ok=$((ok + 1))
+            else
+              skip=$((skip + 1)); echo "not converted: $(basename "$f")"
+            fi
+          done
+          # Wine runs bare-name programs from system32, which Madeira links to the farm.
+          [ -f App/Generated/pedylib/winepe/hello-arm64ec.exe ] && cp App/Generated/pedylib/winepe/hello-arm64ec.exe "$FARM/"
+          [ -f App/Generated/pedylib/winepe/suite-x64.exe ] && cp App/Generated/pedylib/winepe/suite-x64.exe "$FARM/"
+          # Madeira Dock: Valve's own Steam client starts games that need Steam (SteamDock.swift).
+          if [ -f App/Generated/pedylib/winepe/dockhost.exe ]; then
+            cp App/Generated/pedylib/winepe/dockhost.exe App/Generated/pedylib/winepe/dock-notices.txt "$FARM/"
+            echo "- Madeira Dock: dockhost.exe $(sha256sum "$FARM/dockhost.exe" | cut -c1-16)" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "- No-JIT Wine: $ok PE files as signed dylibs, $skip not converted" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # 32-bit games (WoW64, docs/INTERPRETERS.md stage 1): a 32-bit process's 64-bit half runs on
+      # Madeira's aarch64 farm, which becomes signed dylibs like the ARM64EC farm (PE/wine-a64;
+      # Wine maps aarch64 images from there, nojit_dylib.py). The i386 farm (wine-i386.yml) is
+      # data, bundled as it is. FEX's xtajit.dll (the WoW64 CPU with JIT) is not converted.
+      - name: WoW64 farms (aarch64 as signed dylibs, i386)
+        if: steps.wine.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          A64=engine/wine/madeira/app/Madeira/aarch64-windows
+          mkdir -p App/Generated/pedylib/wine-a64
+          I386_RUN=$(bash tools/latest-run.sh wine-i386.yml || true)
+          # Our rebuilds of aarch64 modules (wine-i386.yml: wow64win.dll with atoms kept) replace
+          # Madeira's copies before they become dylibs.
+          if [ -n "$I386_RUN" ] && gh run download "$I386_RUN" -R "$GITHUB_REPOSITORY" -n wine-a64-overrides -D a64-overrides; then
+            for f in a64-overrides/*; do
+              [ -f "$f" ] && cp -f "$f" "$A64/" && echo "- WoW64 host side: $(basename "$f") from run $I386_RUN (patched rebuild)" | tee -a "$GITHUB_STEP_SUMMARY"
+            done
+          fi
+          ok=0; skip=0
+          for f in "$A64"/*; do
+            [ -f "$f" ] || continue
+            [ "$(basename "$f")" = xtajit.dll ] && continue
+            if python3 engine/pedylib/pe2dylib.py convert --strict --keep-ext "$f" App/Generated/pedylib/wine-a64 > /dev/null 2>&1; then
+              ok=$((ok + 1))
+            else
+              skip=$((skip + 1)); echo "aarch64 not converted: $(basename "$f")"
+            fi
+          done
+          [ -f App/Generated/pedylib/winepe-a64/hello-aarch64.exe ] && cp App/Generated/pedylib/winepe-a64/hello-aarch64.exe "$A64/"
+          echo "- WoW64 host side: $ok aarch64 PE files as signed dylibs, $skip not converted ($(du -sh "$A64" | cut -f1) farm)" | tee -a "$GITHUB_STEP_SUMMARY"
+          I386=engine/wine/madeira/app/Madeira/i386-windows
+          mkdir -p "$I386"
+          if [ -n "$I386_RUN" ] && gh run download "$I386_RUN" -R "$GITHUB_REPOSITORY" -n wine-i386-farm -D "$I386"; then
+            # The 32-bit test programs (engine/pedylib/build-spike.sh): C:\windows\syswow64\*.exe
+            cp App/Generated/pedylib/winepe-x86/*.exe "$I386/" 2>/dev/null || true
+            echo "- WoW64 i386 farm: run $I386_RUN, $(ls "$I386" | wc -l | tr -d ' ') files, $(du -sh "$I386" | cut -f1)" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- WoW64 i386 farm: none yet (wine-i386.yml): no target is treated as 32-bit" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Build without Wine
+        if: steps.wine.outcome != 'success'
+        run: |
+          echo "::notice::No Wine in this IPA yet (stage 2 builds in the 'Stage 2 - Wine unix side' workflow)."
+          git checkout -- Config/Wine.xcconfig project.yml
+          rm -rf engine/wine/madeira App/Generated/wine_version.h
+
+      - name: Stage DXMT (stage 3) from the latest DXMT build
+        id: dxmt
+        if: steps.wine.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(bash tools/latest-run.sh dxmt.yml)
+          if [ -z "$RUN" ]; then echo "No successful DXMT build yet"; exit 1; fi
+          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n dxmt-libs -D engine/dxmt/out
+          bash engine/dxmt/stage-app.sh
+
+      - name: Build without DXMT
+        if: steps.wine.outcome == 'success' && steps.dxmt.outcome != 'success'
+        run: |
+          echo "::notice::No DXMT in this IPA (stage 3 builds in the 'Stage 3 - DXMT' workflow); Direct3D returns STATUS_NOT_IMPLEMENTED."
+          git checkout -- Config/DXMT.xcconfig
+          rm -f App/Generated/dxmt_version.h
+
+      - name: Link no-JIT spike dylibs
+        run: |
+          mkdir -p App/Generated/PE
+          bash engine/pedylib/link-dylibs.sh App/Generated/pedylib ||
+            echo "::warning::Spike dylibs did not link; this IPA has no DLL test."
+          if [ -d App/Generated/pedylib/wine ]; then
+            bash engine/pedylib/link-dylibs.sh App/Generated/pedylib/wine App/Generated/PE/wine ||
+              echo "::warning::Wine dylibs did not link; this IPA cannot run Wine without JIT."
+            cp App/Generated/pedylib/winepe/xtajit64.dll App/Generated/PE/wine/ 2>/dev/null || true
+          fi
+          if [ -d App/Generated/pedylib/wine-a64 ] && ls App/Generated/pedylib/wine-a64/*.S > /dev/null 2>&1; then
+            bash engine/pedylib/link-dylibs.sh App/Generated/pedylib/wine-a64 App/Generated/PE/wine-a64 ||
+              echo "::warning::aarch64 Wine dylibs did not link; this IPA cannot run 32-bit games or aarch64 programs without JIT."
+            # The WoW64 CPU module (FXI32's front end): the app links system32\xtajit.dll to this file.
+            cp App/Generated/pedylib/winepe-a64/xtajit.dll App/Generated/PE/wine-a64/ 2>/dev/null || true
+          fi
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app
+        run: |
+          mkdir -p build
+          xcodebuild -project PocketGamesNoJ.xcodeproj -scheme PocketGamesNoJ -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO build > build/xcodebuild.log 2>&1 || true
+          grep -E '(error:|\*\* BUILD)' build/xcodebuild.log | head -100 || true
+          grep -q '\*\* BUILD SUCCEEDED \*\*' build/xcodebuild.log
+
+      - name: Package IPA
+        id: pkg
+        run: |
+          APP=build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
+          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+          # Ad-hoc signature carrying our entitlements, so the sideloader knows to
+          # request the increased memory limit when it re-signs.
+          # DXMT's D3D12 path dlopens the loose shader-converter dylib, so it needs its own signature.
+          MSC=Payload/PocketGamesNoJ.app/d3d12/libmetalirconverter.dylib
+          [ ! -f "$MSC" ] || codesign --force --sign - --timestamp=none "$MSC"
+          # No-JIT spike: Windows DLLs as signed dylibs (engine/pedylib).
+          PEDYLIBS=0
+          while IFS= read -r f; do
+            codesign --force --sign - --timestamp=none "$f" 2>/dev/null
+            PEDYLIBS=$((PEDYLIBS + 1))
+          done < <(find Payload/PocketGamesNoJ.app/PE -name '*.dylib' 2>/dev/null)
+          codesign --force --sign - --entitlements App/PocketGamesNoJ.entitlements --timestamp=none Payload/PocketGamesNoJ.app
+          codesign -d --entitlements - Payload/PocketGamesNoJ.app || true
+          FLAVOR=""
+          [ "${{ steps.blink.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}interp"
+          [ "${{ steps.wine.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}wine"
+          [ "${{ steps.dxmt.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}dxmt"
+          [ -n "$FLAVOR" ] || FLAVOR=uionly
+          NAME="PocketGamesNoJ-0.1.0-build${{ github.run_number }}-${FLAVOR}.ipa"
+          zip -qry "$NAME" Payload
+          ls -la "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "flavor=$FLAVOR" >> "$GITHUB_OUTPUT"
+          {
+            echo "## PocketGamesNoJ build ${{ github.run_number }}"
+            echo "- IPA: \`$NAME\`"
+            echo "- Blink (no-JIT interpreter): ${{ steps.blink.outcome }}"
+            echo "- Wine (stage 2): ${{ steps.wine.outcome }}"
+            echo "- DXMT (stage 3): ${{ steps.dxmt.outcome }}"
+            echo "- No-JIT spike DLLs (signed dylibs): $PEDYLIBS"
+            echo "- Size: $(du -h "$NAME" | cut -f1) (app $(du -sh Payload/PocketGamesNoJ.app | cut -f1))"
+            for d in arm64ec-windows aarch64-windows i386-windows PE/wine PE/wine-a64; do
+              if [ -d "Payload/PocketGamesNoJ.app/$d" ]; then echo "  - $d: $(du -sh "Payload/PocketGamesNoJ.app/$d" | cut -f1)"; fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: ${{ steps.pkg.outputs.name }}
+
+      # Symbols for the device's crash reports (.ips): atos -o <dSYM> -l <load address> <pc>.
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: dsym
+          path: build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app.dSYM
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: build-logs
+          path: |
+            build/xcodebuild.log
+            build/pe-audit.json
+          if-no-files-found: ignore
+
+      - name: Publish release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" "${{ steps.pkg.outputs.name }}" \
+            --target "${{ github.sha }}" --prerelease \
+            --title "PocketGamesNoJ 0.1.0 build ${{ github.run_number }} (${{ steps.pkg.outputs.flavor }})" \

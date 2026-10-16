@@ -1,0 +1,2 @@
+// Default: no interpreter. engine/blink/build-ios.sh overwrites this in CI.
+PocketGamesNoJ_BLINK_LIBS =

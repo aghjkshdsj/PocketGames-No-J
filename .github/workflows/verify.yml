@@ -1,0 +1,27 @@
+name: Verify project
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  app:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate project
+        run: brew install xcodegen && xcodegen generate
+      - name: Compile app with built-in interpreters
+        run: |
+          set -o pipefail
+          xcodebuild -project PocketGamesNoJ.xcodeproj -scheme PocketGamesNoJ -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log
+      - name: Host tests
+        run: bash tests/host/run.sh "$RUNNER_TEMP/tests"
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: verification-log
+          path: build.log

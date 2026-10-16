@@ -1,0 +1,591 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import Foundation
+import GameController
+import UIKit
+import os
+
+/// Runs Windows programs through Wine and the built-in interpreters. One Wine session per app run; with session reuse
+/// (Settings, docs/SESSION_REUSE.md) later games start in that session.
+final class WineController: ObservableObject, @unchecked Sendable {
+    enum State: Equatable { case idle, booting(String), running(String), finished(String, String), failed(String) }
+
+    struct Program: Identifiable {
+        let id: String      // file name in the DLL farm (C:\windows\system32)
+        let title: String
+        let detail: String
+        var graphics = false  // opens a window: shown on the game surface (stage 3)
+        /// Runs with the interpreter: Wine's DLLs from signed dylibs, x64 code through FXI (docs/INTERPRETERS.md).
+        var interpreted = true
+        /// The program file when it differs from id (one exe, two list entries).
+        var exeName: String? = nil
+        var exe: String { exeName ?? id }
+        /// Runs on the aarch64 DLL farm: a plain ARM64 program, or a 32-bit one (WoW64, whose
+        /// 64-bit half is aarch64; docs/INTERPRETERS.md).
+        var aarch64 = false
+    }
+
+    /// The signed Wine dylibs (engine/pedylib), present when CI converted the DLL farm.
+    static let peWineDir = Bundle.main.bundlePath + "/PE/wine"
+    static var signedWineAvailable: Bool {
+        FileManager.default.fileExists(atPath: peWineDir + "/libntdll.dll.dylib")
+    }
+    /// The aarch64 farm as signed dylibs: Wine maps aarch64 images from here (nojit_dylib.py).
+    static let peWineA64Dir = Bundle.main.bundlePath + "/PE/wine-a64"
+    /// 32-bit programs with the interpreter (docs/INTERPRETERS.md): the i386 farm, the aarch64 farm's
+    /// dylibs and the WoW64 CPU module (FXI32's front end) are all in this build.
+    static var wow64Available: Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: Bundle.main.bundlePath + "/i386-windows/ntdll.dll") &&
+            fm.fileExists(atPath: peWineA64Dir + "/libntdll.dll.dylib") &&
+            fm.fileExists(atPath: peWineA64Dir + "/libxtajit.dll.dylib") &&
+            fm.fileExists(atPath: peWineA64Dir + "/xtajit.dll")
+    }
+    static let wow64Refusal = "This build is missing the files required for 32-bit games. Install a complete build to play this game."
+
+    /// the upstream port’s test programs, shipped in the ARM64EC DLL farm.
+    static let programs = [
+        Program(id: "hello-arm64ec.exe", title: "Windows Hello (ARM64EC, interpreted)",
+                detail: "Wine from signed dylibs: native Windows ARM code", interpreted: true),
+        Program(id: "hello-aarch64.exe", title: "Windows Hello (ARM64, interpreted)",
+                detail: "An aarch64 Wine session from signed dylibs: the 64-bit half of 32-bit games", interpreted: true,
+                aarch64: true),
+        Program(id: "hello-i386.exe", title: "Windows Hello (x86 32-bit, interpreted)",
+                detail: "A 32-bit program through WoW64: its x86 code in FXI32, Wine's 64-bit half native", interpreted: true,
+                aarch64: true),
+        Program(id: "suite-x86.exe", title: "x86 test suite (32-bit, interpreted)",
+                detail: "FXI32 in WoW64: window callbacks, threads, exceptions, C++ throw, longjmp, child process",
+                interpreted: true, aarch64: true),
+        Program(id: "hello-x64-nojit", title: "Windows Hello (x64, interpreted)",
+                detail: "x64 code interpreted by FXI inside Wine: signed Windows libraries", interpreted: true,
+                exeName: "hello-x64.exe"),
+        Program(id: "suite-x64.exe", title: "x64 test suite (interpreted)",
+                detail: "FXI inside Wine: callbacks, threads, exceptions, C++ throw, longjmp, child process", interpreted: true),
+        Program(id: "cube-x64-nojit", title: "Direct3D 11 cube (x64, interpreted)",
+                detail: "D3D11 through DXMT to Metal from signed DLLs, the program's code in FXI",
+                graphics: true, interpreted: true, exeName: "cube-x64.exe"),
+        Program(id: "d3d12-cube-x64-nojit", title: "Direct3D 12 cube (x64, interpreted)",
+                detail: "D3D12 through the upstream port’s converter to Metal from signed DLLs, the program's code in FXI",
+                graphics: true, interpreted: true, exeName: "d3d12-cube-x64.exe"),
+        Program(id: "hello-x64.exe", title: "Windows Hello (x64)", detail: "Console hello world through Wine and the interpreter"),
+        Program(id: "fib-x64.exe", title: "Fibonacci (x64)", detail: "Recursive CPU test: x86-64 interpreted call/ret"),
+        Program(id: "clocktest-x64.exe", title: "Clock test (x64)", detail: "Windows timers and QueryPerformanceCounter"),
+        Program(id: "cube-x64.exe", title: "Direct3D 11 cube (x64)", detail: "Spinning cube: D3D11 through DXMT to Metal", graphics: true),
+        Program(id: "d3d12-cube-x64.exe", title: "Direct3D 12 cube (x64)", detail: "Spinning cube: D3D12 through the upstream port’s converter to Metal", graphics: true),
+    ]
+
+    @Published private(set) var state: State = .idle {
+        // A game (or the long Steam sign-in with the interpreter) gets no touches: keep iOS from
+        // locking the screen and suspending the app while Wine runs.
+        didSet {
+            switch state {
+            case .booting, .running: ScreenAwake.set("wine", true)
+            default: ScreenAwake.set("wine", false)
+            }
+            // A Steam game's end, however it ended (its own quit, Quit game, Force quit, a crash,
+            // a start that failed): its changed saves go up to Steam Cloud (SteamCloudSync).
+            switch state {
+            case .finished, .failed: Task { @MainActor in SteamCloudSync.shared.gameEnded() }
+            default: break
+            }
+        }
+    }
+    /// The HID pad this Wine session's wineserver made when it started ("dualsense", or "" for
+    /// none): with the hidpad gate (engine/wine/patches/hidpad_gate.py) every session has it.
+    private(set) var sessionHIDPad = ""
+    /// Player 1 now (the game menu shows and switches it): Xbox or PlayStation, and whether the
+    /// controller is keyboard and mouse.
+    @Published private(set) var padStyle = PadStyle.xbox
+    @Published private(set) var padKeyboard = false
+
+    static func bridgeMode(style: PadStyle, keyboard: Bool) -> ControllerBridge.Mode {
+        keyboard ? .keyboard : style == .playstation ? .playstation : .xbox
+    }
+
+    /// The program this session started (its controller choice is remembered per program).
+    private(set) var sessionProgramID = ""
+    /// The library game this session started ("steam.<App ID>" / "custom.<UUID>"; "" for a test
+    /// program): its controller and touch choices, and its Game settings, are kept under it.
+    private(set) var sessionGameKey = ""
+    /// The next start's game settings (GameSettingsStore.prepareLaunch), used once by run().
+    var pendingOverrides: LaunchOverrides?
+    /// The running (or last) game's settings, nil for a test program.
+    @Published private(set) var sessionOverrides: LaunchOverrides?
+
+    /// The DualSense identity can reach a game of this session (its wineserver made the pad).
+    var playStationAvailable: Bool { sessionHIDPad == "dualsense" || programsThisRun == 0 }
+
+    /// In-game switch to Xbox or PlayStation (the game menu): at once, and remembered for this game.
+    /// XInput stays connected either way; the DualSense appears or goes (a game that looks for
+    /// controllers only when it starts sees the change at its next start).
+    func setPadStyle(_ s: PadStyle) {
+        PadPrefs.setStyle(s, gameKey: sessionGameKey)
+        padStyle = s
+        dlog("[pad] in-game switch to \(s.title)")
+        ControllerBridge.shared.setMode(Self.bridgeMode(style: s, keyboard: padKeyboard))
+        Task { @MainActor in TouchPadOverlay.shared.setStyle(s) }
+    }
+
+    /// In-game switch of the controller-as-keyboard-and-mouse mode: at once, remembered for this game.
+    func setPadKeyboard(_ on: Bool) {
+        PadPrefs.setKeyboard(on, gameKey: sessionGameKey)
+        padKeyboard = on
+        dlog("[pad] in-game keyboard and mouse \(on ? "on" : "off")")
+        ControllerBridge.shared.setMode(Self.bridgeMode(style: padStyle, keyboard: on))
+    }
+
+    /// A C:\ path in the prefix as a file on this iPhone (nil for anything else).
+    func hostURL(windowsPath: String) -> URL? {
+        guard windowsPath.count > 3, windowsPath.dropFirst().hasPrefix(":\\") else { return nil }
+        let rel = windowsPath.dropFirst(3).replacingOccurrences(of: "\\", with: "/")
+        return prefixURL.appendingPathComponent("drive_c").appendingPathComponent(rel)
+    }
+    let linked = mid_wine_linked()
+
+    // ---- Session reuse (docs/SESSION_REUSE.md) ----
+
+    /// Settings › Interpreter › Play another game without restarting (experimental): when a game
+    /// ends, its Wine session stays, and the next game starts in it as a new Windows process.
+    static var reuseEnabled: Bool { UserDefaults.standard.bool(forKey: "sessionReuse") }
+
+    /// What Wine sets up once, for the session's first program: a later game can start in the
+    /// session only when it needs the same.
+    struct SessionKind: Equatable {
+        var interpreted: Bool       // Wine's DLLs from the signed dylibs (WINE_IOS_NOJIT)
+        var aarch64: Bool     // the aarch64 farm (32-bit games through WoW64), else ARM64EC (64-bit)
+        var hidPad: String    // the HID gamepad the wineserver makes when it starts ("" for none)
+        var fxr: Bool         // FXR as the x64 CPU of a 64-bit game (Settings › Windows games: FXR)
+    }
+    /// The x64 CPU of this app run's 64-bit games (true FXR, false FXI), fixed by the first one:
+    /// the CPU is one global of the Wine session (fxi_win_host.c), and threads an ended game left
+    /// running still use the CPU they were made for. nil before the first 64-bit game.
+    private(set) var fxrThisRun: Bool?
+    /// The running session's kind (nil before the first program).
+    private(set) var sessionKind: SessionKind?
+    /// Windows programs started in this app run.
+    private(set) var programsThisRun = 0
+    /// The running (or last) session stays when its game ends: Quit game can then leave
+    /// PocketGamesNoJ open.
+    @Published private(set) var sessionKept = false
+    /// Force quit was asked for the running game (its end is reported as that, not as a crash).
+    private let forceQuitAsked = OSAllocatedUnfairLock(initialState: false)
+    /// No limit on the number of games: an ended 32-bit game's window comes back when the next
+    /// one starts (docs/SESSION_REUSE.md). A 64-bit game's memory still stays in use until
+    /// PocketGamesNoJ closes, so the next game needs this much free (iOS ends an app that runs out).
+    static let minFreeMB = 1536
+
+    /// Force quit (a kept session's game that does not close after Quit game): the Wine server
+    /// terminates the session's programs as TerminateProcess does, and the session stays for the
+    /// next game (docs/SESSION_REUSE.md). False when there is nothing to end.
+    func forceQuit() -> Bool {
+        guard sessionKept, mid_wine_running() != 0 else { return false }
+        forceQuitAsked.withLock { $0 = true }
+        return mid_wine_force_quit() != 0
+    }
+
+
+    /// Why another game cannot start now (nil: it can, as far as is known without the game;
+    /// `kind` adds the game's own checks).
+    func nextGameRefusal(_ kind: SessionKind? = nil) -> String? {
+        let restart = "To play another, swipe PocketGames No J away in the app switcher and open it again."
+        guard Self.reuseEnabled else {
+            return "PocketGames No J runs one Windows game per launch. \(restart) (Settings › Interpreter › Play another game without restarting lets the next game start without that.)"
+        }
+        guard let session = sessionKind, session.interpreted, sessionKept else {
+            return "This Wine session was not kept for another game. Enable Play another game without restarting before launching a game. \(restart)"
+        }
+        guard mid_wine_session_reusable() != 0 else {
+            return "The last game's Wine session is no longer running. \(restart)"
+        }
+        if let kind {
+            if !kind.interpreted {
+                return "Another game can start in the running Wine session only with the interpreter. \(restart)"
+            }
+            // A 64-bit game after a 32-bit one, or the reverse, runs as the upstream port’s cross-architecture
+            // processes do (the bridge keeps the session's system32; docs/SESSION_REUSE.md).
+            // The controller is never a reason: XInput is there in every session, and the
+            // DualSense in every session of a build with the hidpad gate (run()).
+        }
+        // The x64 CPU is not a reason to refuse: every 64-bit game of a run takes the first one's (run()).
+        let freeMB = os_proc_available_memory() >> 20
+        if freeMB < Self.minFreeMB {
+            return "Only \(freeMB) MB of memory is free: an earlier game's memory stays in use until PocketGames No J closes. \(restart)"
+        }
+        return nil
+    }
+
+    /// What kind of start run() is doing (set by the run* helpers just before it).
+    private enum Launch { case program, steam, custom, dock }
+    private var nextLaunch = Launch.program
+
+    private let queue = DispatchQueue(label: "pocketgamesnoj.wine", qos: .userInitiated)
+
+    var prefixURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("wine-prefix")
+    }
+
+    /// Stage 4d: a Steam game started as its own program (no Steam client). The
+    /// bridge publishes its identity (SteamAppId / SteamGameId / SteamAppPath)
+    /// and starts it in Steam's working folder; it reads and clears these.
+    /// Interpreter the game takes the interpreter session (signed Wine DLLs, x64 code in FXI), as
+    /// the built-in interpreter programs do; the upstream port picks ARM64EC for it from the full path.
+    func runSteamGame(appID: Int, title: String, plan: SteamLaunchPlan) {
+        let interpreted = true
+        var is32 = false
+        if interpreted {
+            let machine = peMachine(windowsPath: plan.exe)
+            is32 = machine == 0x14c
+            dlog("[wine] interpreter Steam launch: \(plan.exe) machine=0x\(String(machine, radix: 16))\(is32 ? " (32-bit: WoW64 with FXI32, experimental)" : "")")
+            if is32 && !Self.wow64Available {
+                state = .failed(Self.wow64Refusal)
+                return
+            }
+        }
+        setenv("MADEIRA_STEAM_APPID", String(appID), 1)
+        setenv("MADEIRA_STEAM_APPPATH", plan.appPath, 1)
+        setenv("MADEIRA_WORKDIR", plan.workingFolder, 1)
+        nextLaunch = .steam
+        run(Program(id: plan.exe, title: title, detail: "", graphics: true, interpreted: interpreted, aarch64: is32), args: plan.arguments)
+    }
+
+    /// A game the user added (CustomGames: a DRM-free folder in Documents/Games, C:\Games in
+    /// Wine), started in its program's folder. Not a Steam game: like a Dock session, the bridge
+    /// publishes no Steam identity for it (MADEIRA_DOCK_SESSION), so no game sees the upstream port’s
+    /// fixed fallback App ID.
+    func runCustomGame(_ game: CustomGame) {
+        let interpreted = true
+        CustomGames.prepare(prefix: prefixURL)                       // C:\Games -> Documents/Games
+        let machine = peMachine(windowsPath: game.windowsExe)
+        let is32 = interpreted && machine == 0x14c
+        dlog("[games] start \(game.name): \(game.windowsExe) machine=0x\(String(machine, radix: 16)) interpreted=\(interpreted ? 1 : 0)\(is32 ? " (32-bit: WoW64 with FXI32, experimental)" : "")")
+        if is32 && !Self.wow64Available {
+            state = .failed(Self.wow64Refusal)
+            return
+        }
+        for k in ["MADEIRA_STEAM_APPID", "MADEIRA_STEAM_APPPATH"] { unsetenv(k) }
+        setenv("MADEIRA_WORKDIR", game.windowsWorkdir, 1)
+        nextLaunch = .custom
+        run(Program(id: game.windowsExe, title: game.name, detail: "", graphics: true, interpreted: interpreted, aarch64: is32), args: game.arguments)
+    }
+
+    /// Set while an added game runs (no Steam identity for it).
+    private(set) var customActive = false
+
+    /// A Steam game started through Steam Dock (App/Sources/Steam/SteamDock.swift): Wine runs
+    /// dockhost.exe, which loads Valve's own steamclient64.dll, signs in with the user's token
+    /// (the one-use transfer the caller wrote), asks Valve's client whether the account owns the
+    /// game and has it start the game with Valve's LaunchApp. The game then finds a running,
+    /// signed-in Steam client, as on a PC. Interpreter the host, Valve's client and the game are
+    /// x64 code in FXI; the game is the host's child process.
+    func runDockGame(_ game: DockGame, launchOption: UInt32, title: String) {
+        let interpreted = true
+        for k in ["MADEIRA_STEAM_APPID", "MADEIRA_STEAM_APPPATH", "MADEIRA_WORKDIR"] { unsetenv(k) }   // no direct start
+        SteamDock.configure(game, launchOption: launchOption)
+        // Interpreter Valve's client runs interpreted: in build 105 it was still in its HTTPS
+        // setup (OpenSSL in CHTTPClientThreadPool) when the host's 90 s sign-in wait ran out.
+        // Our dockhost (engine/pedylib/madeira-dock-signin-wait.patch) reads a longer wait here.
+        if interpreted { setenv("MADEIRA_DOCK_SIGNIN_MS", "480000", 1) } else { unsetenv("MADEIRA_DOCK_SIGNIN_MS") }
+        // Interpreter Valve's client never finished a TLS handshake in time (build 178: its CM
+        // pings over WebSocket have 1 s each and failed at once, the HTTPS CM directory timed out
+        // after 27 s and its second try never returned, with the client's HTTP thread in OpenSSL's
+        // bignum code throughout). Its other transport to Steam, UDP/TCP with Valve's own channel
+        // encryption, needs no TLS: the host has the client prefer it
+        // (engine/pedylib/madeira-dock-cm-transport.patch). With JIT the client decides as usual.
+        if interpreted { setenv("MADEIRA_DOCK_CM_TRANSPORT", "netfilter", 1) } else { unsetenv("MADEIRA_DOCK_CM_TRANSPORT") }
+        // Build 181: the client still asks its HTTPS CM directory first and waited on it for over
+        // 4 minutes. Its address then resolves to nothing at once (engine/wine/patches/dns_refuse.py),
+        // so the request fails and the client takes the UDP/TCP servers PocketGamesNoJ wrote into its
+        // config.vdf (DockCMCache). Cleared for every other launch (run()).
+        if interpreted { setenv("PocketGamesNoJ_DNS_REFUSE", "api.steampowered.com", 1) } else { unsetenv("PocketGamesNoJ_DNS_REFUSE") }
+        dlog("[dock-launch] app=\(game.id) launch-option=\(launchOption) interpreted=\(interpreted ? 1 : 0) signin-wait=\(interpreted ? 480 : 90)s cm-transport=\(interpreted ? "netfilter" : "client's choice")")
+        nextLaunch = .dock
+        run(Program(id: SteamDock.executable, title: title, detail: "", graphics: true, interpreted: interpreted))
+    }
+
+    /// Set while a Dock game runs: watch() polls the host's report (C:\madeira-dock.txt).
+    private(set) var dockActive = false
+    /// The host's failure, in words, when its report ended with a nonzero result.
+    @Published private(set) var dockFailure: String?
+
+    /// IMAGE_FILE_HEADER.Machine of a C:\ path in the prefix (0x8664 x64, 0x14c i386; 0 unreadable).
+    func peMachine(windowsPath: String) -> UInt16 {
+        guard windowsPath.count > 3, windowsPath.dropFirst().hasPrefix(":\\") else { return 0 }
+        let rel = windowsPath.dropFirst(3).replacingOccurrences(of: "\\", with: "/")
+        let url = prefixURL.appendingPathComponent("drive_c").appendingPathComponent(rel)
+        guard let h = try? FileHandle(forReadingFrom: url) else { return 0 }
+        defer { try? h.close() }
+        guard let d = try? h.read(upToCount: 4096), d.count >= 0x40, d[0] == 0x4d, d[1] == 0x5a else { return 0 }
+        let pe = Int(d[0x3c]) | Int(d[0x3d]) << 8 | Int(d[0x3e]) << 16 | Int(d[0x3f]) << 24
+        guard pe > 0, pe + 6 <= d.count, d[pe] == 0x50, d[pe + 1] == 0x45 else { return 0 }
+        return UInt16(d[pe + 4]) | UInt16(d[pe + 5]) << 8
+    }
+
+    func run(_ program: Program, args: String = "") {
+        let launch = nextLaunch
+        nextLaunch = .program
+        let overrides = pendingOverrides
+        pendingOverrides = nil
+        // Per-launch variables (runSteamGame) must not outlive a launch that never boots.
+        func refuse(_ why: String) {
+            for k in ["MADEIRA_STEAM_APPID", "MADEIRA_STEAM_APPPATH", "MADEIRA_WORKDIR"] { unsetenv(k) }
+            state = .failed(why)
+        }
+        guard linked else { return refuse("This build does not include Wine yet.") }
+        switch state {
+        case .booting, .running:
+            // A game is still running, maybe with its view hidden: its state stays as it is (a
+            // .failed here closed its view and hid the Return bar). Play says why (LibraryView).
+            dlog("[wine] start of \(program.title) refused: a program is still running")
+            return
+        default: break
+        }
+        // the upstream port’s wineserver cannot start twice in one process (init_registry aborts on
+        // "\Registry"), so a later game either joins the running session (session reuse,
+        // docs/SESSION_REUSE.md) or needs a restart (nextGameRefusal says which, and why).
+        // Player 1: Xbox or PlayStation (and keyboard and mouse), the game's own choice or the default.
+        let style = PadPrefs.style(gameKey: overrides?.gameKey, programID: program.id)
+        let keyboardPad = PadPrefs.keyboard(gameKey: overrides?.gameKey, programID: program.id)
+        // The DualSense HID pad is made when the wineserver starts. With the hidpad gate it is made
+        // for every session and is absent in Xbox mode (ControllerBridge), so either style works
+        // for every game of a kept session; without it, only for a PlayStation session.
+        let wantHIDPad = mid_hidpad_gate() != 0 || style == .playstation
+        let interpreterSession = true
+        // The x64 CPU (Settings › Windows games: FXR). FXI and FXR both drop the blocks of an
+        // earlier game before a later one starts (wine_host.c), so every 64-bit game of a run may
+        // use either; but all of them use the first one's (fxrThisRun). 32-bit games never use it (FXI32).
+        let wantFXR = interpreterSession && !program.aarch64 && (overrides?.fxr ?? UserDefaults.standard.bool(forKey: "winFXR"))
+        let useFXR = interpreterSession && !program.aarch64 && (fxrThisRun ?? wantFXR)
+        let kind = SessionKind(interpreted: interpreterSession, aarch64: program.aarch64, hidPad: wantHIDPad ? "dualsense" : "", fxr: useFXR)
+        if programsThisRun > 0, let why = nextGameRefusal(kind) {
+            dlog("[session-reuse] \(program.title) not started: \(why)")
+            return refuse(why)
+        }
+        dockActive = launch == .dock
+        if launch != .dock { unsetenv("PocketGamesNoJ_DNS_REFUSE") }   // only a Dock session with the interpreter (runDockGame)
+        customActive = launch == .custom
+        dockFailure = nil
+        forceQuitAsked.withLock { $0 = false }
+        // The bridge keeps the wineserver when this program ends (WineProcessBridge.m as patched by
+        // engine/wine/patches/session_reuse.py), so the next game can start in the session.
+        let keep = interpreterSession && Self.reuseEnabled
+        if keep { setenv("PocketGamesNoJ_SESSION_REUSE", "1", 1) } else { unsetenv("PocketGamesNoJ_SESSION_REUSE") }
+        // Interpreted: Wine maps its DLLs from the signed dylibs and loads the stub x64 emulator.
+        if true {
+            guard Self.signedWineAvailable else {
+                return refuse("This build has no signed Wine DLLs (interpreter Wine).")
+            }
+            if program.aarch64 && !FileManager.default.fileExists(atPath: Self.peWineA64Dir + "/libntdll.dll.dylib") {
+                return refuse("This build has no signed aarch64 Wine DLLs.")
+            }
+            setenv("WINE_IOS_NOJIT", "1", 1)
+            setenv("PocketGamesNoJ_PE_DIR", Self.peWineDir, 1)
+            setenv("PocketGamesNoJ_PE_DIR_A64", Self.peWineA64Dir, 1)
+            setenv("PocketGamesNoJ_NOJIT_EMULATOR", Self.peWineDir + "/xtajit64.dll", 1)
+            // 32-bit programs: wow64.dll's CPU module is FXI32's front end (system32\xtajit.dll).
+            if FileManager.default.fileExists(atPath: Self.peWineA64Dir + "/xtajit.dll") {
+                setenv("PocketGamesNoJ_NOJIT_WOW_CPU", Self.peWineA64Dir + "/xtajit.dll", 1)
+            } else {
+                unsetenv("PocketGamesNoJ_NOJIT_WOW_CPU")
+            }
+            // An aarch64 program gets the upstream port’s plain aarch64 session (its exe name picks it).
+            if program.aarch64 { unsetenv("MADEIRA_USE_ARM64EC") } else { setenv("MADEIRA_USE_ARM64EC", "1", 1) }
+            setenv("PocketGamesNoJ_NOJIT_TRACE", CrashReporter.interpreterTraceURL.path, 1)
+            dlog("[wine] interpreter session: DLLs from \(Self.peWineDir)\(program.aarch64 ? " (aarch64: \(Self.peWineA64Dir))" : "")")
+            // Settings › Interpreter › game audio off: no audio endpoints, so the game's audio
+            // engine (decoding and mixing in the interpreter) does not run.
+            // Game settings › Audio overrides it per game.
+            if !(overrides?.audio ?? !UserDefaults.standard.bool(forKey: "muteGameAudio")) {
+                setenv("WINEDLLOVERRIDES", "mmdevapi=d", 1)
+                dlog("[wine] interpreter session without audio (mmdevapi disabled)")
+            } else {
+                unsetenv("WINEDLLOVERRIDES")
+            }
+            // Settings › Interpreter › Windows games: FXR (fxi_win_host.c picks the x64 CPU). A 32-bit
+            // game keeps the run's x64 CPU too: x64 code may still run in the session.
+            if fxrThisRun ?? kind.fxr {
+                setenv("PocketGamesNoJ_WIN_CPU", "fxr", 1)
+                if !program.aarch64 { dlog("[wine] interpreter session with FXR as the x64 CPU") }
+            } else {
+                unsetenv("PocketGamesNoJ_WIN_CPU")
+            }
+            if !program.aarch64, let first = fxrThisRun, first != wantFXR {
+                dlog("[session-reuse] \(program.title) runs with \(first ? "FXR" : "FXI") like the first 64-bit game of this app run (Settings › Windows games: FXR changed since; it applies after PocketGames No J restarts)")
+            }
+        }
+        // A 32-bit game's launcher starts the game and exits (Steins;Gate: Launcher.exe ->
+        // Game.exe): the session waits for the children it started instead of ending with the
+        // launcher and killing the game (the upstream port’s MADEIRA_WAIT_CHILDREN; opt-in there because a
+        // child that ends from a worker thread can keep the session waiting, which the game menu's
+        // Quit ends). 64-bit sessions keep the upstream port’s default.
+        if program.aarch64 { setenv("MADEIRA_WAIT_CHILDREN", "1", 1) } else { unsetenv("MADEIRA_WAIT_CHILDREN") }
+        // A Dock session publishes no fixed Steam game identity: the upstream port’s bridge otherwise sets
+        // SteamAppId/SteamGameId/SteamAppPath (its Thumper fallback) for every launch, and in
+        // build 105 that reached Valve's client inside the host, which then never finished
+        // signing in (result 34). Valve's client gives the game it starts its own identity.
+        // An added (non-Steam) game gets none either.
+        if dockActive || customActive { setenv("MADEIRA_DOCK_SESSION", "1", 1) } else { unsetenv("MADEIRA_DOCK_SESSION") }
+        state = .booting(program.title)
+        // Controller API for this session (Settings › Controller, `api` above). Must be in the
+        // environment before the wineserver starts: the HID device and the
+        // DirectInput joystick are created at session start.
+        sessionProgramID = program.id
+        sessionGameKey = overrides?.gameKey ?? ""
+        sessionOverrides = overrides
+        let touchProgram = program.id, touchGame = overrides?.gameKey
+        Task { @MainActor in GameInput.shared.load(for: touchProgram, gameKey: touchGame) }   // its touch mode: off unless chosen
+        // Game settings › Frame rate: DXMT paces a Direct3D 10/11 game's presents to it.
+        if let line = overrides?.dxmtConfig {
+            setenv("DXMT_CONFIG", line, 1)
+            dlog("[game-settings] DXMT_CONFIG=\(line)")
+        } else {
+            unsetenv("DXMT_CONFIG")
+        }
+        // Game settings › Show performance overlay: Metal's HUD on the game's layer.
+        let hud = overrides?.performanceHUD ?? false
+        Task { @MainActor in GameHostView.shared.setPerformanceHUD(hud) }
+        unsetenv("MADEIRA_DINPUT_PAD"); unsetenv("MADEIRA_HIDPAD"); unsetenv("MADEIRA_HIDPAD_NAME")
+        unsetenv("MADEIRA_DINPUT_TRACE")
+        if wantHIDPad { setenv("MADEIRA_HIDPAD", "dualsense", 1) }   // read when the wineserver starts
+        if programsThisRun == 0 { sessionHIDPad = wantHIDPad ? "dualsense" : "" }
+        else if style == .playstation, sessionHIDPad.isEmpty {
+            dlog("[pad] \(program.title) is set to PlayStation, but this Wine session started without the DualSense: XInput (Xbox) until PocketGames No J restarts")
+        }
+        // DirectInput: PocketGamesNoJ's pad for a game that reads DirectInput and never XInput (found in
+        // its files; read by the game's dinput when it starts). In PlayStation mode DirectInput lists
+        // the DualSense instead, and a game naming XInput would see the controller twice.
+        var dinput = false
+        // Not for a With Steam start: its program is Valve's launcher (dockhost.exe), not the game.
+        if style == .xbox, !keyboardPad, launch != .dock, let exe = hostURL(windowsPath: program.exe) ?? hostURL(windowsPath: program.id),
+           FileManager.default.fileExists(atPath: exe.path) {
+            dinput = PadAPIScan.needsDInputPad(PadPrefs.scanAPIs(exe: exe))
+        }
+        // Its trace (the upstream port’s joystick_ios.c, rate-limited) shows in the log whether the game reads it.
+        if dinput { setenv("MADEIRA_DINPUT_PAD", "1", 1); setenv("MADEIRA_DINPUT_TRACE", "1", 1) }
+        padStyle = style
+        padKeyboard = keyboardPad
+        ControllerBridge.shared.setMode(Self.bridgeMode(style: style, keyboard: keyboardPad))
+        let padStyleNow = style
+        Task { @MainActor in TouchPadOverlay.shared.setStyle(padStyleNow) }
+        dlog("[pad] \(program.title): \(keyboardPad ? "keyboard and mouse" : style.title)\(dinput ? ", with the DirectInput pad" : "")\(wantHIDPad ? "; DualSense device \(mid_hidpad_gate() != 0 ? "in the session (shown in PlayStation mode)" : "made for this session")" : "")")
+        // DXMT takes the layer when the program creates its swapchain.
+        if program.graphics {
+            GameHostView.register()
+            if programsThisRun > 0 { GameHostView.shared.clearPicture() }   // not the last game's frame
+            // The virtual monitor takes the phone's landscape shape, so a game that
+            // runs at the desktop resolution fills the screen (win32u reads these
+            // once per session; the default 1024x768 is letterboxed).
+            let (w, h) = Self.monitorSize(height: overrides?.resolution ?? UserDefaults.standard.integer(forKey: "monitorHeight"))
+            if programsThisRun > 0, let first = Self.firstMonitorHeight, h != first {
+                dlog("[display] \(program.title) asks for a \(h)-line monitor; Wine keeps the session's first (\(first) lines) until PocketGames No J restarts")
+            }
+            if programsThisRun == 0 { Self.firstMonitorHeight = h }
+            setenv("MADEIRA_SCREEN_W", String(w), 1)
+            setenv("MADEIRA_SCREEN_H", String(h), 1)
+            dlog("[display] virtual monitor \(w)x\(h) for \(program.title)")
+        }
+        let prefix = prefixURL.path
+        dlog("[wine] booting \(program.exe) in \(prefix)\(programsThisRun > 0 ? " (in the running session, program \(programsThisRun + 1) of this app run)" : "")")
+        queue.async {
+            var err = [CChar](repeating: 0, count: 512)
+            let ok = mid_wine_boot(prefix, program.exe, args, &err, err.count)
+            let msg = String(cString: err)
+            DispatchQueue.main.async {
+                self.state = ok ? .running(program.title) : .failed(msg)
+                if ok {
+                    if self.programsThisRun == 0 { self.sessionKind = kind }
+                    if kind.interpreted && !kind.aarch64 && self.fxrThisRun == nil { self.fxrThisRun = kind.fxr }
+                    self.programsThisRun += 1
+                    self.sessionKept = keep
+                } else {
+                    dlog("[wine] boot failed: \(msg)")
+                }
+            }
+            if ok { self.watch(program.title) }
+        }
+    }
+
+    /// The first game's monitor height: win32u reads the size once per Wine session.
+    private static var firstMonitorHeight: Int?
+
+    /// `height` lines high (720 by default, light enough for the GPU at 60 fps; Settings ›
+    /// Performance and Game settings › Display change it), as wide as the screen's landscape
+    /// aspect (a multiple of 8): 1560x720 on an iPhone 15 Pro Max.
+    static func monitorSize(height: Int = 720) -> (Int, Int) {
+        let b = UIScreen.main.nativeBounds
+        let long = max(b.width, b.height), short = min(b.width, b.height)
+        let h = LaunchOverrides.validResolution(height)
+        guard short > 0 else { return (h * 16 / 9 / 8 * 8, h) }
+        let w = Int((CGFloat(h) * long / short / 8).rounded()) * 8
+        return (w, h)
+    }
+
+    /// Poll until the Windows program exits, then report how it ended.
+    private func watch(_ title: String) {
+        let started = Date()
+        var ticks = 0, clientLogsDumped = false
+        while mid_wine_running() != 0 {
+            usleep(250_000)
+            ticks += 1
+            // Steam Dock: log the host's report fields as they change ([dock-report]), and
+            // show its progress over the (still black) game surface.
+            if dockActive, ticks % 4 == 0 {
+                let seconds = Int(Date().timeIntervalSince(started))
+                // Valve's client logs once about 4 min in too, in case the session is cut short.
+                let dumpLogs = !clientLogsDumped && seconds >= 240
+                if dumpLogs { clientLogsDumped = true }
+                Task { @MainActor in
+                    let report = SteamDock.pollReport()
+                    GameHostView.shared.setStatus(SteamDock.progressText(report, seconds: seconds))
+                    if dumpLogs { SteamDock.logClientLogs() }
+                }
+            }
+        }
+        if dockActive { Task { @MainActor in GameHostView.shared.setStatus(nil) } }
+        if dockActive {
+            let done = DispatchSemaphore(value: 0)
+            Task { @MainActor in
+                let report = SteamDock.pollReport()
+                self.dockFailure = report.failure
+                if let failure = report.failure { dlog("[dock-launch] result=\(report.result ?? -1): \(failure)") }
+                SteamDock.logClientLogs()
+                SteamDock.cleanup()
+                unsetenv("PocketGamesNoJ_DNS_REFUSE")   // the Dock session ended: names resolve again
+                done.signal()
+            }
+            done.wait()
+        }
+        var status: UInt32 = 0
+        let forced = forceQuitAsked.withLock { $0 }
+        let crashed = !forced && wine_crash_exit_status(&status) != 0
+        let secs = String(format: "%.1f s", Date().timeIntervalSince(started))
+        let how = forced ? "was force-quit after \(secs)"
+            : crashed ? String(format: "ended with error 0x%08X after %@", status, secs) : "exited normally after \(secs)"
+        dlog("[wine] \(title) \(how)")
+        // Test programs write their report to C:\pocketgamesnoj-output.txt: proof that does not
+        // depend on where the console's output goes.
+        let report = prefixURL.appendingPathComponent("drive_c/pocketgamesnoj-output.txt")
+        if let text = try? String(contentsOf: report, encoding: .utf8) {
+            for line in text.split(whereSeparator: \.isNewline) { dlog("[program] \(line)") }
+            try? FileManager.default.removeItem(at: report)
+        }
+        DispatchQueue.main.async {
+            self.state = .finished(title, how)
+            // After the game surface has closed (LibraryView closes it on an error).
+            if crashed {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { CrashReporter.shared.programCrashed(title, how: how) }
+            }
+        }
+    }
+}
+
+/// Keeps the screen on while anything needs it (a running game, a Steam download): one
+/// switch for the whole app, so one holder ending does not turn it off for another.
+enum ScreenAwake {
+    @MainActor private static var holders = Set<String>()
+    /// Callable from any thread; applied on the main actor in call order.
+    static func set(_ holder: String, _ on: Bool) {
+        Task { @MainActor in
+            if on { holders.insert(holder) } else { holders.remove(holder) }
+            UIApplication.shared.isIdleTimerDisabled = !holders.isEmpty
+        }
+    }
+}

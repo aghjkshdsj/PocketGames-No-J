@@ -1,0 +1,216 @@
+name: FXR interpreter
+
+# FXR = FXI with the guest registers pinned in host registers (engine/fxr), the fast no-JIT engine.
+# Guests are built once on x86 (gcc), then on the ARM64 and x86 runners: correctness gates for FXR
+# and FXI (hello; atomics, x87, difftest identical to native; --scan-pe of Madeira's x64 programs),
+# then speed as a share of native on the standard and held-out sets (engine/fxr/compare.sh: median
+# of 5, rotating order, checksums must match; native = the same clang 19 at -O2 -ffp-contract=off).
+# Plus an iOS compile check (the app links FXR next to FXI, so no global fxi_* symbols).
+on:
+  push:
+    branches: ["main", "claude/**"]
+    paths: ["engine/fxr/**", "!engine/fxr/corpus.sh", "engine/fxr-probe/**", "engine/fxi/**", "engine/guest/**", ".github/workflows/fxr.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fxr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The held-out benchmark is frozen (commit 57ce94e)
+        run: |
+          blob=$(git rev-parse HEAD:engine/guest/heldout.c)
+          echo "engine/guest/heldout.c blob $blob"
+          test "$blob" = 1728cd7f759f26c9d063baaf72ea91501982fb12
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq xxd > /dev/null
+      - run: bash engine/guest/build.sh "$RUNNER_TEMP/guests"
+      - name: Native reference outputs (for the gates on ARM64)
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-out"
+          for t in atomics x87 difftest bignum; do "$RUNNER_TEMP/guests/$t.elf" > "$RUNNER_TEMP/native-out/$t.txt"; done
+          wc -l "$RUNNER_TEMP"/native-out/*.txt
+      - name: Madeira x64 test programs (for --scan-pe)
+        run: |
+          . engine/wine/PIN
+          mkdir -p "$RUNNER_TEMP/pe"
+          for exe in hello-x64 fib-x64 clocktest-x64 heap-x64 fileio-x64 calltest-x64 fpconf-x64 child-test-x64 cube-x64 d3d12-cube-x64; do
+            curl -fsSL -o "$RUNNER_TEMP/pe/$exe.exe" \
+              "https://raw.githubusercontent.com/willfaust/Madeira/$MADEIRA_SHA/app/Madeira/arm64ec-windows/$exe.exe" || echo "no $exe"
+          done
+          ls -la "$RUNNER_TEMP/pe"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: fxr-guests
+          path: |
+            ${{ runner.temp }}/guests/*.elf
+            ${{ runner.temp }}/native-out/*.txt
+            ${{ runner.temp }}/pe/*.exe
+
+  compare:
+    needs: guests
+    timeout-minutes: 45   # a guest that loops forever fails here, not at GitHub's 6-hour limit
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: fxr-guests
+          path: in
+      - name: clang 19 (preserve_none on ARM64)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-19 > /dev/null || (wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && sudo bash /tmp/llvm.sh 19 > /dev/null)
+          clang-19 --version | head -1
+          uname -a; lscpu | grep -E 'Model name|Vendor|MHz|^CPU\(s\)' || true
+      - name: Build FXR, FXI and the native drivers (all clang 19)
+        run: |
+          mkdir -p guests; cp in/guests/*.elf guests/ 2>/dev/null || cp in/*.elf guests/
+          chmod +x guests/*.elf
+          ls in in/* | head -40
+          CC=clang-19 bash engine/fxr/build.sh "$RUNNER_TEMP/fxr"
+          CC=clang-19 bash engine/fxi/build.sh "$RUNNER_TEMP/fxi"
+          clang-19 -O2 -ffp-contract=off -o "$RUNNER_TEMP/native" engine/fxr/native.c
+          clang-19 -O2 -ffp-contract=off -DHELDOUT_HOSTED -o "$RUNNER_TEMP/native_heldout" engine/guest/heldout.c
+      - name: Correctness gates (FXR and FXI)
+        run: |
+          NAT=$( [ "$(uname -m)" = x86_64 ] && echo run || echo "$(dirname "$(find in -name difftest.txt | head -1)")" )
+          PE=$(dirname "$(find in -name 'hello-x64.exe' | head -1)")
+          rc=0
+          bash engine/fxr/gates.sh "$PWD/guests" "$RUNNER_TEMP/fxr/fxr" fxr "$NAT" "$PE" || rc=1
+          bash engine/fxr/gates.sh "$PWD/guests" "$RUNNER_TEMP/fxi/fxi" fxi "$NAT" "$PE" || rc=1
+          exit $rc
+      - name: Program after program (FXR and FXI) - every block dropped before the next game
+        run: |
+          # engine/fxr-probe/invalidate_test.c: A, then B at the same addresses after
+          # fxi_win_invalidate_all, 400 times, with another thread looping inside a dropped block.
+          objs=$(ls "$RUNNER_TEMP"/fxr/obj/*.o | grep -v '/fxi_main\.o$')
+          X86=$( [ "$(uname -m)" = x86_64 ] && echo -mcx16 || true )
+          clang-19 -O2 -std=gnu11 $X86 -Iengine/fxr -o "$RUNNER_TEMP/invalidate_fxr" engine/fxr-probe/invalidate_test.c $objs -lm -lpthread
+          clang-19 -O2 -std=gnu11 $X86 -Iengine/fxi -o "$RUNNER_TEMP/invalidate_fxi" engine/fxr-probe/invalidate_test.c \
+            $(ls engine/fxi/fxi_*.c | grep -v '/fxi_main\.c$') -lm -lpthread
+          rc=0
+          timeout 300 "$RUNNER_TEMP/invalidate_fxr" || rc=1
+          timeout 300 "$RUNNER_TEMP/invalidate_fxi" || rc=1
+          exit $rc
+      - name: Windows-mode state gate (FXR, ARM64) - the x64 state at a stop and at a fault
+        if: runner.arch == 'ARM64'
+        run: |
+          objs=$(ls "$RUNNER_TEMP"/fxr/obj/*.o | grep -v '/fxi_main\.o$')
+          clang-19 -O2 -o "$RUNNER_TEMP/winstate_test" engine/fxr-probe/winstate_test.c $objs -lm -lpthread
+          rc=0
+          export FXR_WINLOWER=1   # lower as Windows mode does
+          "$RUNNER_TEMP/winstate_test" guests/winstate.elf loop || rc=1
+          "$RUNNER_TEMP/winstate_test" guests/winstate.elf winexit || rc=1
+          "$RUNNER_TEMP/winstate_test" guests/winstate.elf winnative || rc=1
+          for s in 0 1 2 3 4 5 6 7 8 9 10 11; do "$RUNNER_TEMP/winstate_test" guests/winstate.elf fault $s || rc=1; done
+          objdump -d --no-show-raw-insn -j fxr_h "$RUNNER_TEMP/fxr/fxr" > /tmp/fxr_h.txt
+          python3 engine/fxr-probe/precise.py /tmp/fxr_h.txt || rc=1
+          exit $rc
+      - name: Speed vs native (standard + held-out)
+        run: |
+          if [ "$(uname -m)" = x86_64 ]; then
+            # x86 hosts lack preserve_none's argument registers: checksums only (one run).
+            bash engine/fxr/compare.sh "$PWD/guests" "$RUNNER_TEMP/fxr/fxr" "$RUNNER_TEMP/fxi/fxi" elf elf 1
+          else
+            bash engine/fxr/compare.sh "$PWD/guests" "$RUNNER_TEMP/fxr/fxr" "$RUNNER_TEMP/fxi/fxi" "$RUNNER_TEMP/native" "$RUNNER_TEMP/native_heldout" 5
+          fi
+      - name: perf (ARM64, where the runner exposes the PMU)
+        if: runner.arch == 'ARM64'
+        continue-on-error: true
+        run: |
+          bash engine/fxr/probe_cc.sh clang-19 || true
+          sudo apt-get install -y -qq linux-tools-common "linux-tools-$(uname -r)" > /dev/null 2>&1 || sudo apt-get install -y -qq linux-tools-generic > /dev/null 2>&1 || true
+          sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0 || true
+          PERF=$(ls /usr/lib/linux-tools/*/perf 2>/dev/null | head -1); PERF=${PERF:-perf}
+          for k in integer:3 float:16 memory:50 branch:6 simd:150; do
+            echo "== perf stat FXR ${k%%:*}"
+            sudo "$PERF" stat -e cycles,instructions,branches,branch-misses,L1-icache-load-misses,L1-dcache-load-misses \
+              "$RUNNER_TEMP/fxr/fxr" guests/bench_sse2.elf "${k%%:*}" "${k##*:}" 2>&1 | grep -vE '^\s*$' | tail -12
+          done
+          echo "== diagnostic: A/B of FXR's knobs (fxr_pin.c; the defaults ship), kernel ns, median of 5, configurations interleaved"
+          cfgs=(default FXR_REPLICAS=0 FXR_TRACES=0)
+          for k in integer:3 float:16 memory:50 branch:6 simd:150; do
+            declare -A res=()
+            for r in 1 2 3 4 5; do
+              for cfg in "${cfgs[@]}"; do
+                v=$(env $([ "$cfg" = default ] || echo $cfg) taskset -c 1 "$RUNNER_TEMP/fxr/fxr" guests/bench_sse2.elf "${k%%:*}" "${k##*:}" 2>/dev/null | grep -o " ns=[0-9]*" | cut -d= -f2)
+                res[$cfg]="${res[$cfg]:-} $v"
+              done
+            done
+            for cfg in "${cfgs[@]}"; do
+              printf "  %-8s %-30s %s\n" "${k%%:*}" "$cfg" "$(tr ' ' '\n' <<< "${res[$cfg]}" | sed '/^$/d' | sort -n | sed -n 3p)"
+            done
+            unset res
+          done
+          echo "== diagnostic: one threaded dispatch on this CPU (engine/fxr-probe/dispatch_probe.c, 200M dispatches)"
+          for b in "plain:"; do
+            clang-19 -O2 ${b#*:} -o "/tmp/dprobe_${b%%:*}" engine/fxr-probe/dispatch_probe.c
+          done
+          for cfg in "plain ind 32 32" "plain ind 32 4" "plain st 32 32" "plain ld 32 32" "plain cp 32 32" "plain cp 32 4" \
+                     "plain cp 4 4" "plain mix 32 8" "plain chain 13 13"; do
+            set -- $cfg
+            sudo taskset -c 1 "$PERF" stat -x, -e cycles,instructions,stall_frontend,br_mis_pred "/tmp/dprobe_$1" "$2" "$3" "$4" 2>&1 >/dev/null | \
+              awk -F, -v c="$cfg" 'BEGIN { printf "%-24s", c } { v[$3] = $1 } END { printf " cycles/dispatch=%.2f insns/dispatch=%.2f frontend-stall/dispatch=%.2f mispredicts/dispatch=%.4f\n", v["cycles"] / 2e8, v["instructions"] / 2e8, v["stall_frontend"] / 2e8, v["br_mis_pred"] / 2e8 }'
+          done
+          echo "== diagnostic: PMU events perf lists on this runner (frontend, branches, ops)"
+          "$PERF" list --raw-dump 2>/dev/null | tr ' ' '\n' | grep -iE "stall|front|l1i|itlb|br_|btb|op_|inst_|mop|fetch|bound|slot" | sort -u | tr '\n' ' '; echo
+          sudo taskset -c 1 "$PERF" stat -x, -e cycles,stall_frontend,stall_backend,stall_slot_frontend,stall_slot_backend,op_spec,op_retired,br_retired,br_mis_pred_retired,br_indirect_spec,inst_spec \
+            "$RUNNER_TEMP/fxr/fxr" guests/bench_sse2.elf integer 3 2>&1 >/dev/null | grep -v '^\[fxi\]' | awk -F, '{ printf "  %s=%s", $3, $1 } END { print "" }'
+          echo "== diagnostic: the hottest blocks uop by uop (FXR built with -DFXR_PROFILE, engine/fxr-probe/profile.py)"
+          sudo apt-get install -y -qq llvm-19 > /dev/null 2>&1 || true
+          EXTRA_CFLAGS=-DFXR_PROFILE CC=clang-19 bash engine/fxr/build.sh /tmp/fxrprof > /dev/null
+          for k in integer:1 float:4 memory:10 branch:1 simd:30; do
+            echo "-- ${k%%:*}"
+            /tmp/fxrprof/fxr guests/bench_sse2.elf "${k%%:*}" "${k##*:}" > /dev/null 2> /tmp/prof.txt || true
+            python3 engine/fxr-probe/profile.py /tmp/fxrprof/fxr guests/bench_sse2.elf /tmp/prof.txt | head -160
+          done
+          echo "== diagnostic: where the frontend stalls (PMU events the runner exposes)"
+          for k in integer:3 memory:50 branch:6 simd:150; do
+            for aslr in on on off off; do
+              pre=(); [ "$aslr" = off ] && pre=(setarch "$(uname -m)" -R)
+              sudo taskset -c 1 "${pre[@]}" "$PERF" stat -x, -e cycles,instructions,stall_frontend,l1i_cache,l1i_cache_refill,l1i_tlb_refill,itlb_walk,br_indirect_spec,br_mis_pred \
+                "$RUNNER_TEMP/fxr/fxr" guests/bench_sse2.elf "${k%%:*}" "${k##*:}" 2>&1 >/dev/null | grep -v '^\[fxi\]' | \
+                awk -F, -v k="${k%%:*}" -v a="$aslr" 'BEGIN { printf "%s aslr=%s", k, a } { printf " %s=%s", $3, $1 } END { print "" }'
+            done
+          done
+          echo "== perf record FXR (all five standard kernels)"
+          hot=""
+          for k in integer:3 float:16 memory:50 branch:6 simd:150; do
+            sudo "$PERF" record -q -o "/tmp/perf_${k%%:*}.data" "$RUNNER_TEMP/fxr/fxr" guests/bench_sse2.elf "${k%%:*}" "${k##*:}" > /dev/null 2>&1
+            echo "-- ${k%%:*}"; sudo "$PERF" report -i "/tmp/perf_${k%%:*}.data" --stdio --sort symbol 2>/dev/null | grep -v '^#' | grep -v '^$' | head -25 | tee /tmp/rep.txt
+            hot="$hot $(grep '\[\.\]' /tmp/rep.txt | head -4 | awk '{print $3}')"
+          done
+          echo "== code of the hottest handlers"
+          for s in $(tr ' ' '\n' <<< "$hot" | sed '/^$/d' | sort -u); do
+            objdump -d --no-show-raw-insn "$RUNNER_TEMP/fxr/fxr" | awk -v s="<$s>:" 'index($0, s) { p = 1 } p && /^$/ { exit } p' | cut -c1-90
+          done
+
+  ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compile FXR for iOS arm64
+        run: |
+          cd engine/fxr
+          xcrun -sdk iphoneos clang --version | head -1
+          srcs="fxr_pin_win.c fxr_pin_x3.c fxr_pin_arj.c fxr_pin_lcj.c fxr_pin_stub.c fxr_pin_step1.c fxr_pin_step2.c fxr_pin_step3.c fxr_pin_mem.c fxr_pin_mem2.c fxr_pin_fuse.c fxr_pin_sse.c fxr_pin_alu.c fxr_pin_br.c fxr_pin.c fxr_pin_alu_r1.c fxr_pin_sse_r1.c fxr_pin_mem_r1.c fxr_pin_mem2_r1.c fxr_pin_step3_r1.c fxr_pin_br_r1.c fxr_pin_step1_r1.c fxr_pin_step2_r1.c fxi_core.c fxi_decode.c fxi_flags.c fxi_ops.c fxi_sse.c fxi_atomic.c fxi_x87.c fxi_win.c"
+          printf '%s\n' $srcs | xargs -P "$(sysctl -n hw.ncpu)" -I{} sh -c 'xcrun -sdk iphoneos clang -arch arm64 -O2 -std=gnu11 -ffp-contract=off -mllvm -enable-tail-merge=false -miphoneos-version-min=17.0 -c "{}" -o "/tmp/$(basename {} .c).o"'
+          echo "preserve_none: $(echo '__attribute__((preserve_none)) void f(void){}' | xcrun -sdk iphoneos clang -arch arm64 -x c -c - -o /dev/null 2>&1 && echo supported || echo NOT supported)"
+          bash probe_cc.sh "xcrun -sdk iphoneos clang -arch arm64" || true
+          ls -la /tmp/fxr_pin*.o
+          # the app links FXR next to FXI: every FXR object must exist, and none may define fxi_* names
+          for f in $srcs; do test -s "/tmp/${f%.c}.o" || { echo "missing /tmp/${f%.c}.o"; exit 1; }; done
+          clash=$(for f in /tmp/fxi_*.o /tmp/fxr_pin*.o; do nm -g -U "$f"; done | awk '{print $NF}' | grep -E '^_fxi_' || true)
+          if [ -n "$clash" ]; then echo "FXR defines FXI's global names (add them to engine/fxr/fxr_rename.h):"; echo "$clash"; exit 1; fi
+          echo "no global fxi_* symbols"
