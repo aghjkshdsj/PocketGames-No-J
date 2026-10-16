@@ -287,126 +287,6 @@ enum SteamCloudTransfer {
     }()
 }
 
-// MARK: - Backups
-
-/// One backup folder: Documents/save-backups/<App ID>/<time>/, with the saved files under
-/// device/ (this device's copies a download or a restore replaced) and cloud/ (the cloud's copies
-/// an upload replaced; Steam keeps none), and backup.json, which Restore reads. The Files app
-/// shows the folder (On My iPhone › PocketGamesNoJ › save-backups).
-struct SteamCloudBackup: Codable, Identifiable, Equatable, Sendable {
-    struct File: Codable, Equatable, Sendable {
-        /// The cloud path (%Root%...), which says where the file goes back.
-        var cloudPath: String
-        /// Where the copy is, relative to the backup folder.
-        var stored: String
-        /// "device" or "cloud".
-        var side: String
-        var size: UInt64
-        var sha: String
-        /// The file's own modification time (Unix seconds).
-        var time: UInt64
-    }
-    var appID: Int
-    var created: Date
-    var reason: String
-    var files: [File]
-    /// The folder's name (its time), not stored.
-    var folder = ""
-
-    var id: String { folder }
-    private enum CodingKeys: String, CodingKey { case appID, created, reason, files }
-}
-
-enum SteamCloudBackups {
-    static var root: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("save-backups", isDirectory: true)
-    }
-    static func folder(_ appID: Int) -> URL { root.appendingPathComponent(String(appID), isDirectory: true) }
-
-    /// Collects the files of one backup; the folder and its manifest are written as files arrive.
-    final class Writer {
-        let appID: Int
-        let reason: String
-        private(set) var files: [SteamCloudBackup.File] = []
-        private var url: URL?
-        private var created = Date()
-
-        init(appID: Int, reason: String) { self.appID = appID; self.reason = reason }
-
-        var isEmpty: Bool { files.isEmpty }
-        var folderName: String? { url?.lastPathComponent }
-
-        private func ensureFolder() throws -> URL {
-            if let url { return url }
-            let format = DateFormatter()
-            format.locale = Locale(identifier: "en_US_POSIX")
-            format.dateFormat = "yyyy-MM-dd HH-mm-ss"
-            created = Date()
-            let base = SteamCloudBackups.folder(appID)
-            var name = format.string(from: created)
-            var n = 2
-            while FileManager.default.fileExists(atPath: base.appendingPathComponent(name).path) {
-                name = format.string(from: created) + " (\(n))"; n += 1
-            }
-            let made = base.appendingPathComponent(name, isDirectory: true)
-            try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true)
-            url = made
-            return made
-        }
-
-        /// Copies `data` (one side's copy of the save at `cloudPath`) into the backup and writes the
-        /// manifest. Throws when it cannot: the caller then changes nothing.
-        func add(_ data: Data, cloudPath: String, side: String, time: UInt64) throws {
-            let folder = try ensureFolder()
-            let (rootName, rest) = SteamCloudPaths.split(cloudPath)
-            var parts = [side, rootName ?? "remote"]
-            parts += rest.replacingOccurrences(of: "\\", with: "/").split(separator: "/").map(String.init)
-                .filter { $0 != "." && $0 != ".." && !$0.isEmpty }
-            let stored = parts.joined(separator: "/")
-            let target = folder.appendingPathComponent(stored)
-            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: target, options: .atomic)
-            if time > 0 {
-                try? FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: TimeInterval(time))], ofItemAtPath: target.path)
-            }
-            files.append(.init(cloudPath: cloudPath, stored: stored, side: side, size: UInt64(data.count),
-                               sha: SteamCloudRecord.hex(SteamCloudTransfer.sha1(data)), time: time))
-            let manifest = SteamCloudBackup(appID: appID, created: created, reason: reason, files: files)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(manifest).write(to: folder.appendingPathComponent("backup.json"), options: .atomic)
-        }
-    }
-
-    /// The game's backups, newest first.
-    static func list(_ appID: Int) -> [SteamCloudBackup] {
-        let base = folder(appID)
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        var out: [SteamCloudBackup] = []
-        for name in names where !name.hasPrefix(".") {
-            let manifest = base.appendingPathComponent(name).appendingPathComponent("backup.json")
-            guard let data = try? Data(contentsOf: manifest), data.count < 8 << 20,
-                  var backup = try? decoder.decode(SteamCloudBackup.self, from: data), backup.appID == appID else { continue }
-            backup.folder = name
-            out.append(backup)
-        }
-        return out.sorted { $0.created > $1.created }
-    }
-
-    /// Removes the backups SteamCloudBackupRetention lets go (never the newest ones).
-    static func prune(_ appID: Int) {
-        let all = list(appID)
-        let drop = SteamCloudBackupRetention.expired(all.map { ($0.folder, $0.created) }, now: Date())
-        for name in drop {
-            try? FileManager.default.removeItem(at: folder(appID).appendingPathComponent(name, isDirectory: true))
-        }
-        if !drop.isEmpty { SteamLog.event("[steam-cloud] app=\(appID) backups pruned=\(drop.count) kept=\(all.count - drop.count)") }
-    }
-}
-
 // MARK: - The sync
 
 /// What Play does about a game's cloud saves before the game starts.
@@ -725,7 +605,7 @@ final class SteamCloudSync: ObservableObject {
                 state.lastResult = did + "In sync with Steam Cloud."
             }
             games[appID] = state
-            SteamCloudBackups.prune(appID)
+            try SteamCloudBackups.prune(appID)
             if !plan.conflicts.isEmpty { return .conflicts(plan.conflicts.count) }
             return clear ? nil : .failed("Steam Cloud has not confirmed the saves just copied. Try again in a moment.")
         } catch {
@@ -762,6 +642,7 @@ final class SteamCloudSync: ObservableObject {
             let time = (try? item.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate?.timeIntervalSince1970 ?? 0
             try backup.add(current, cloudPath: item.entry.path, side: "device", time: UInt64(max(0, time)))
         }
+        try backup.finish()
         var settled: [String: SteamCloudRecord.FileState] = [:]
         for item in fetched {
             try FileManager.default.createDirectory(at: item.url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -807,6 +688,7 @@ final class SteamCloudSync: ObservableObject {
                 let copy = try await cloudFile(appID, item.entry)
                 try backup.add(copy, cloudPath: item.entry.path, side: "cloud", time: item.entry.cloudTime)
             }
+            try backup.finish()
             SteamLog.event("[steam-cloud] app=\(appID) cloud copies backed up before upload files=\(replaced.count)")
         }
         let session = SteamLibrary.shared.cloudSession
@@ -1064,6 +946,7 @@ final class SteamCloudSync: ObservableObject {
                 if current == item.data { continue }
                 try before.add(current, cloudPath: item.file.cloudPath, side: "device", time: 0)
             }
+            try before.finish()
             for item in items {
                 try FileManager.default.createDirectory(at: item.url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try item.data.write(to: item.url, options: .atomic)

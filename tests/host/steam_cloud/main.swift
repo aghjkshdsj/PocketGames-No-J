@@ -226,16 +226,17 @@ let now = Date(timeIntervalSince1970: 2_000_000_000)
 func backups(_ ages: [Double]) -> [(name: String, created: Date)] {
     ages.enumerated().map { ("b\($0.offset)", now.addingTimeInterval(-$0.element * 86_400)) }
 }
-check(SteamCloudBackupRetention.expired(backups(Array(repeating: 1, count: 100)), now: now).isEmpty, "recent backups all stay")
-let old = backups((0..<40).map { 100 + Double($0) })   // 40 backups, all older than 60 days
-let dropped = Set(SteamCloudBackupRetention.expired(old, now: now))
-check(dropped.count == 10, "beyond 30, the oldest go (\(dropped.count))")
-check(dropped == Set((30..<40).map { "b\($0)" }), "only the oldest ones")
-let mixed = backups((0..<12).map { 200 + Double($0) })   // 12 old: under the limit
-check(SteamCloudBackupRetention.expired(mixed, now: now).isEmpty, "under the limit nothing goes, however old")
-let many = backups((0..<45).map { 70 + Double($0) })
-let gone = SteamCloudBackupRetention.expired(many, now: now)
-check(!gone.contains { ["b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9"].contains($0) }, "the newest ten never go")
+check(SteamCloudBackupRetention.expired(backups([1, 2, 3, 4, 5])).isEmpty, "five backups remain")
+check(SteamCloudBackupRetention.expired(backups([1, 2, 3, 4, 5, 6])) == ["b5"], "the sixth removes only the oldest")
+check(SteamCloudBackupRetention.expired(backups([100, 200, 300, 400, 500])).isEmpty, "five old backups also remain")
+let recent = backups((0..<100).map { Double($0) / 100 })
+check(SteamCloudBackupRetention.expired(recent).count == 95, "recent backups obey the same five-set cap")
+check(Set(SteamCloudBackupRetention.expired(backups((0..<12).map(Double.init)))) ==
+      Set((5..<12).map { "b\($0)" }), "an existing collection is reduced to its newest five")
+let rollback = backups([1, 2, 3, 4, 5]) + [("new", Date(timeIntervalSince1970: 1))]
+check(!SteamCloudBackupRetention.expired(rollback, keeping: "new").contains("new"), "the just-completed backup survives a clock rollback")
+let tied = (0..<6).map { (name: "same-\($0)", created: now) }
+check(SteamCloudBackupRetention.expired(tied) == ["same-0"], "equal timestamps have a deterministic order")
 
 try? FileManager.default.removeItem(at: root)
 print("steam cloud host tests: \(checks - failures)/\(checks) passed")

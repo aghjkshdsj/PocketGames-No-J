@@ -10,6 +10,7 @@ struct SteamCloudSection: View {
     @ObservedObject private var cloud = SteamCloudSync.shared
     @State private var backups: [SteamCloudBackup] = []
     @State private var restoring: SteamCloudBackup?
+    @State private var deleting: SteamCloudBackup?
     @State private var message: String?
     @State private var working = false
     @State private var showBackups = false
@@ -67,6 +68,19 @@ struct SteamCloudSection: View {
                 run { message = await cloud.restore(appID, backup) }
              }, .cancel()]
         }
+        .glassDialog(item: $deleting, title: { "Delete the backup of \(Self.date($0.created))?" }, message: { _ in "This permanently deletes this backup set. Your current game saves and Steam Cloud files are kept." }) { backup in
+            [DialogButton(title: "Delete backup") {
+                run {
+                    guard !gameRunning, !cloud.isBusy(appID) else {
+                        message = "Wait until the game and its sync have ended."; return
+                    }
+                    do {
+                        try SteamCloudBackups.delete(appID, backup)
+                        message = "Backup deleted."
+                    } catch { message = error.localizedDescription }
+                }
+             }, .cancel()]
+        }
     }
 
     /// A manual upload or download waiting for the user's confirmation.
@@ -102,7 +116,13 @@ struct SteamCloudSection: View {
         }
     }
 
-    private func reloadBackups() { backups = SteamCloudBackups.list(appID) }
+    private func reloadBackups() {
+        if !gameRunning, !cloud.isBusy(appID) {
+            do { try SteamCloudBackups.prune(appID) }
+            catch { message = "Backup cleanup could not finish: \(error.localizedDescription)" }
+        }
+        backups = SteamCloudBackups.list(appID)
+    }
 
     // MARK: Parts
 
@@ -233,14 +253,20 @@ struct SteamCloudSection: View {
                         Spacer()
                         Button("Restore…") { restoring = b }
                             .buttonStyle(.bordered)
-                            .disabled(working || gameRunning)
-                            .padFocus("cloud.restore.\(b.id)", radius: 10) { if !(working || gameRunning) { restoring = b } }
+                            .disabled(working || gameRunning || cloud.isBusy(appID))
+                            .padFocus("cloud.restore.\(b.id)", radius: 10) { if !(working || gameRunning || cloud.isBusy(appID)) { restoring = b } }
+                        Button("Delete", role: .destructive) { deleting = b }
+                            .buttonStyle(.bordered)
+                            .disabled(working || gameRunning || cloud.isBusy(appID))
+                            .padFocus("cloud.delete.\(b.id)", radius: 10) { if !(working || gameRunning || cloud.isBusy(appID)) { deleting = b } }
                     }
                 }
                 Text("In the Files app: On My iPhone › PocketGames No J › save-backups › \(String(appID)).")
                     .font(.caption2).foregroundStyle(Deck.dim)
+                Text("Keeps the five newest backup sets per game. A completed sixth backup replaces the oldest.")
+                    .font(.caption2).foregroundStyle(Deck.dim)
             } label: {
-                Text("Backups (\(backups.count))")
+                Text("Backups (\(backups.count)/5)")
                     .padFocus("cloud.backups", radius: 8) { withGlassAnimation { showBackups.toggle() } }
             }
             .font(.subheadline)

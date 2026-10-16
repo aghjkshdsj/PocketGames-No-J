@@ -11,7 +11,12 @@ struct PocketGamesNoJApp: App {
     @ObservedObject private var crashes = CrashReporter.shared
     @Environment(\.scenePhase) private var phase
 
-    init() { dlog("PocketGames No J by Dan") }
+    init() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        dlog("PocketGames No J by Dan — version \(version), build \(build)")
+    }
 
     var body: some Scene {
         WindowGroup {

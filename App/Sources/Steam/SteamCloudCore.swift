@@ -452,24 +452,17 @@ struct SteamCloudPlan: Equatable, Sendable {
 
 // MARK: - Backups
 
-/// Which save backups may be removed. Backups are folders named by their time
-/// (Documents/save-backups/<App ID>/<time>); every one younger than `keepDays` stays, and so do
-/// the newest `keepNewest`, whatever their age. Beyond that only the oldest go, down to `keepMax`.
+/// Keep five completed backup sets per game, regardless of age. A newly
+/// completed backup is protected even if the device clock moved backward.
 enum SteamCloudBackupRetention {
-    static let keepNewest = 10
-    static let keepMax = 30
-    static let keepDays = 60.0
+    static let keepMax = 5
 
-    static func expired(_ backups: [(name: String, created: Date)], now: Date) -> [String] {
-        let newestFirst = backups.sorted { $0.created > $1.created }
-        guard newestFirst.count > keepMax else { return [] }
-        var excess = newestFirst.count - keepMax
-        var drop: [String] = []
-        for backup in newestFirst.dropFirst(keepNewest).reversed() where excess > 0 {
-            guard now.timeIntervalSince(backup.created) > keepDays * 86_400 else { continue }
-            drop.append(backup.name)
-            excess -= 1
+    static func expired(_ backups: [(name: String, created: Date)], keeping: String? = nil) -> [String] {
+        let newestFirst = backups.sorted {
+            if ($0.name == keeping) != ($1.name == keeping) { return $0.name == keeping }
+            if $0.created != $1.created { return $0.created > $1.created }
+            return $0.name > $1.name
         }
-        return drop
+        return newestFirst.dropFirst(keepMax).reversed().map(\.name)
     }
 }
