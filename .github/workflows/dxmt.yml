@@ -62,6 +62,10 @@ jobs:
           path: engine/dxmt/danport
           key: dxmt-${{ hashFiles('engine/dxmt/PIN') }}-v1-${{ github.run_id }}
 
+      - name: Record dxmt source revision
+        if: success()
+        run: python3 tools/artifact_manifest.py write engine/dxmt/out dxmt
+
       - uses: actions/upload-artifact@v5
         if: success()
         with:
@@ -77,8 +81,3 @@ jobs:
             engine/dxmt/danport/build/dxmt-ios/obj/*.err
           if-no-files-found: ignore
 
-      - name: Rebuild the IPA with this library
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run build-ipa.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"

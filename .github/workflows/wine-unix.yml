@@ -87,6 +87,10 @@ jobs:
           path: engine/wine/danport
           key: wine-unix-${{ hashFiles('engine/wine/PIN') }}-v1-${{ github.run_id }}
 
+      - name: Record wine-unix source revision
+        if: success()
+        run: python3 tools/artifact_manifest.py write engine/wine/out wine-unix
+
       - uses: actions/upload-artifact@v5
         if: always()
         with:
@@ -104,8 +108,3 @@ jobs:
             engine/wine/obj-wineserver/*.err
           if-no-files-found: ignore
 
-      - name: Rebuild the IPA with these libraries
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run build-ipa.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"

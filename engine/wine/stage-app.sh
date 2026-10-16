@@ -20,7 +20,7 @@ done
 python3 "$ROOT/tools/port_source.py" checkout "$M" --repository-id "$DANPORT_REPOSITORY_ID" --ref "$DANPORT_SHA"
 A="$M/app/DanPort"
 python3 "$HERE/patches/interpreter_bridge.py" "$A"
-ls "$A/arm64ec-windows/ntdll.dll" "$A/arm64ec-windows/xtajit64.dll" "$A/prefix-template.tar.gz" > /dev/null
+ls "$A/arm64ec-windows/ntdll.dll" "$A/prefix-template.tar.gz" > /dev/null
 
 # No-JIT step B: with PocketGamesNoJ_NOJIT_EMULATOR set, system32\xtajit64.dll points at the stub
 # emulator (engine/pedylib/emu) instead of FEX, which needs JIT.
@@ -212,5 +212,5 @@ open(p, "w").write(s)
 PY
 cat "$ROOT/Config/Wine.xcconfig"
 mkdir -p "$A/i386-windows"
-rm -f "$A/arm64ec-windows/xtajit64.dll" "$A/aarch64-windows/xtajit.dll"
+rm -f "$A/aarch64-windows/xtajit.dll"
 du -sh "$A/arm64ec-windows" "$A/aarch64-windows" "$A/i386-windows" "$A/nls"

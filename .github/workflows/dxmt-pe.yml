@@ -52,7 +52,6 @@ jobs:
 
       - name: DanPort D3D12 DLLs
         id: d3d12
-        continue-on-error: true
         run: bash engine/dxmt/build-pe.sh d3d12
 
       # Fails when a DLL imports a toolchain runtime DLL (libc++, libunwind) the prefix lacks.
@@ -70,6 +69,10 @@ jobs:
           path: engine/wine/danport
           key: dxmt-pe-${{ hashFiles('engine/wine/PIN', 'engine/dxmt/PIN') }}-v1-${{ github.run_id }}
 
+      - name: Record dxmt-pe source revision
+        if: success()
+        run: python3 tools/artifact_manifest.py write engine/dxmt/out-pe dxmt-pe
+
       - uses: actions/upload-artifact@v5
         if: steps.collect.outcome == 'success'
         with:
@@ -85,8 +88,3 @@ jobs:
             engine/wine/danport/dxmt/build-arm64ec-16k*/meson-logs/*.txt
           if-no-files-found: ignore
 
-      - name: Rebuild the IPA with these DLLs
-        if: steps.collect.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run build-ipa.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"

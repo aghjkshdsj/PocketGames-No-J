@@ -43,14 +43,12 @@ jobs:
           key: llvm-mingw-20260421-ucrt-ubuntu-x86_64
       - name: No-JIT spike DLLs (ARM64EC + ARM64, 16 KB aligned)
         id: spike
-        continue-on-error: true
         run: bash engine/pedylib/build-spike.sh "$RUNNER_TEMP/guests/pedylib" "$RUNNER_TEMP/llvm-mingw"
       - name: Spike result
         if: steps.spike.outcome != 'success'
         run: echo "::warning::The no-JIT spike DLLs did not build (see 'No-JIT spike DLLs'); this IPA has no DLL test."
       - name: FXI static scan of the x64 test suite
         if: steps.spike.outcome == 'success'
-        continue-on-error: true
         run: |
           sudo apt-get install -y -qq clang > /dev/null
           bash engine/fxi/build.sh "$RUNNER_TEMP/fxi" > /dev/null
@@ -62,7 +60,7 @@ jobs:
 
   ios:
     name: iOS interpreter app
-    needs: guests
+    needs: [host-tests, guests]
     runs-on: macos-26
     timeout-minutes: 120
     steps:
@@ -99,18 +97,17 @@ jobs:
 
       - name: Stage Wine (stage 2) from the latest Wine unix build
         id: wine
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           RUN=$(bash tools/latest-run.sh wine-unix.yml)
           if [ -z "$RUN" ]; then echo "No successful Wine unix build yet"; exit 1; fi
           gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n wine-unix-libs -D engine/wine/out
+          python3 tools/artifact_manifest.py check engine/wine/out wine-unix
           bash engine/wine/stage-app.sh
 
       - name: Audit Wine DLLs for the no-JIT scheme (signed dylibs)
         if: steps.wine.outcome == 'success'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -118,6 +115,7 @@ jobs:
           # 4 KB-aligned prebuilt ones, which cannot become signed dylibs.
           D3D_RUN=$(bash tools/latest-run.sh dxmt-pe.yml || true)
           if [ -n "$D3D_RUN" ] && gh run download "$D3D_RUN" -R "$GITHUB_REPOSITORY" -n d3d-pe-dlls -D "$RUNNER_TEMP/d3d-pe"; then
+            python3 tools/artifact_manifest.py check "$RUNNER_TEMP/d3d-pe" dxmt-pe
             cp "$RUNNER_TEMP"/d3d-pe/*.dll engine/wine/danport/app/DanPort/arm64ec-windows/
             echo "- D3D DLLs: 16 KB-aligned rebuild from run $D3D_RUN ($(ls "$RUNNER_TEMP"/d3d-pe | tr '\n' ' '))" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
@@ -158,7 +156,6 @@ jobs:
       # data, bundled as it is. FEX's xtajit.dll (the WoW64 CPU with JIT) is not converted.
       - name: WoW64 farms (aarch64 as signed dylibs, i386)
         if: steps.wine.outcome == 'success'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -168,6 +165,7 @@ jobs:
           # Our rebuilds of aarch64 modules (wine-i386.yml: wow64win.dll with atoms kept) replace
           # DanPort's copies before they become dylibs.
           if [ -n "$I386_RUN" ] && gh run download "$I386_RUN" -R "$GITHUB_REPOSITORY" -n wine-a64-overrides -D a64-overrides; then
+            python3 tools/artifact_manifest.py check a64-overrides wine-a64
             for f in a64-overrides/*; do
               [ -f "$f" ] && cp -f "$f" "$A64/" && echo "- WoW64 host side: $(basename "$f") from run $I386_RUN (patched rebuild)" | tee -a "$GITHUB_STEP_SUMMARY"
             done
@@ -187,6 +185,7 @@ jobs:
           I386=engine/wine/danport/app/DanPort/i386-windows
           mkdir -p "$I386"
           if [ -n "$I386_RUN" ] && gh run download "$I386_RUN" -R "$GITHUB_REPOSITORY" -n wine-i386-farm -D "$I386"; then
+            python3 tools/artifact_manifest.py check "$I386" wine-i386
             # The 32-bit test programs (engine/pedylib/build-spike.sh): C:\windows\syswow64\*.exe
             cp App/Generated/pedylib/winepe-x86/*.exe "$I386/" 2>/dev/null || true
             echo "- WoW64 i386 farm: run $I386_RUN, $(ls "$I386" | wc -l | tr -d ' ') files, $(du -sh "$I386" | cut -f1)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -194,45 +193,28 @@ jobs:
             echo "- WoW64 i386 farm: none yet (wine-i386.yml): no target is treated as 32-bit" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Build without Wine
-        if: steps.wine.outcome != 'success'
-        run: |
-          echo "::notice::No Wine in this IPA yet (stage 2 builds in the 'Stage 2 - Wine unix side' workflow)."
-          git checkout -- Config/Wine.xcconfig project.yml
-          rm -rf engine/wine/danport App/Generated/wine_version.h
-
       - name: Stage DXMT (stage 3) from the latest DXMT build
         id: dxmt
         if: steps.wine.outcome == 'success'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           RUN=$(bash tools/latest-run.sh dxmt.yml)
           if [ -z "$RUN" ]; then echo "No successful DXMT build yet"; exit 1; fi
           gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n dxmt-libs -D engine/dxmt/out
+          python3 tools/artifact_manifest.py check engine/dxmt/out dxmt
           bash engine/dxmt/stage-app.sh
-
-      - name: Build without DXMT
-        if: steps.wine.outcome == 'success' && steps.dxmt.outcome != 'success'
-        run: |
-          echo "::notice::No DXMT in this IPA (stage 3 builds in the 'Stage 3 - DXMT' workflow); Direct3D returns STATUS_NOT_IMPLEMENTED."
-          git checkout -- Config/DXMT.xcconfig
-          rm -f App/Generated/dxmt_version.h
 
       - name: Link no-JIT spike dylibs
         run: |
           mkdir -p App/Generated/PE
-          bash engine/pedylib/link-dylibs.sh App/Generated/pedylib ||
-            echo "::warning::Spike dylibs did not link; this IPA has no DLL test."
+          bash engine/pedylib/link-dylibs.sh App/Generated/pedylib
           if [ -d App/Generated/pedylib/wine ]; then
-            bash engine/pedylib/link-dylibs.sh App/Generated/pedylib/wine App/Generated/PE/wine ||
-              echo "::warning::Wine dylibs did not link; this IPA cannot run Wine without JIT."
+            bash engine/pedylib/link-dylibs.sh App/Generated/pedylib/wine App/Generated/PE/wine
             cp App/Generated/pedylib/winepe/xtajit64.dll App/Generated/PE/wine/ 2>/dev/null || true
           fi
           if [ -d App/Generated/pedylib/wine-a64 ] && ls App/Generated/pedylib/wine-a64/*.S > /dev/null 2>&1; then
-            bash engine/pedylib/link-dylibs.sh App/Generated/pedylib/wine-a64 App/Generated/PE/wine-a64 ||
-              echo "::warning::aarch64 Wine dylibs did not link; this IPA cannot run 32-bit games or aarch64 programs without JIT."
+            bash engine/pedylib/link-dylibs.sh App/Generated/pedylib/wine-a64 App/Generated/PE/wine-a64
             # The WoW64 CPU module (FXI32's front end): the app links system32\xtajit.dll to this file.
             cp App/Generated/pedylib/winepe-a64/xtajit.dll App/Generated/PE/wine-a64/ 2>/dev/null || true
           fi
@@ -249,6 +231,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO build > build/xcodebuild.log 2>&1 || true
           grep -E '(error:|\*\* BUILD)' build/xcodebuild.log | head -100 || true
           grep -q '\*\* BUILD SUCCEEDED \*\*' build/xcodebuild.log
+
+      - name: Verify complete game bundle
+        run: python3 tools/validate_runtime.py build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
 
       - name: Package IPA
         id: pkg

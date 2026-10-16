@@ -74,11 +74,19 @@ jobs:
             grep -E '^== ' collect.log | sed 's/^== /- /; s/ ==$//'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record wine-i386 source revision
+        if: success()
+        run: python3 tools/artifact_manifest.py write engine/wine/out-i386/i386-windows wine-i386
+
       - uses: actions/upload-artifact@v5
         with:
           name: wine-i386-farm
           path: engine/wine/out-i386/i386-windows
           retention-days: 90
+
+      - name: Record wine-a64 source revision
+        if: success()
+        run: python3 tools/artifact_manifest.py write engine/wine/out-i386/aarch64-windows wine-a64
 
       - uses: actions/upload-artifact@v5
         with:

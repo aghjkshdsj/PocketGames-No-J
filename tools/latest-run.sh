@@ -7,8 +7,8 @@
 set -euo pipefail
 wf="${1:?workflow file}"
 for br in "${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}" main; do
-    run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$wf" --branch "$br" --status success --limit 1 \
-        --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+    run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$wf" --branch "$br" --status success --limit 20 \
+        --json databaseId,headSha --jq ".[] | select(.headSha == \"$GITHUB_SHA\") | .databaseId" 2>/dev/null | head -1 || true)
     if [ -n "$run" ]; then
         echo "$wf: run $run ($br)" >&2
         echo "$run"
