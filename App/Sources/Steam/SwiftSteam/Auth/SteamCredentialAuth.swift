@@ -113,7 +113,7 @@ class SteamCredentialAuth {
             pollRequest.clientID = clientID
             pollRequest.requestID = requestIDData
 
-            let responseData = try await SteamAuthAPI.call("PollAuthSessionStatus", body: pollRequest.serialize())
+            guard let responseData = try await SteamAuthAPI.poll(body: pollRequest.serialize(), until: deadline) else { break }
             let pollResponse = try CAuthentication_PollAuthSessionStatus_Response.deserialize(from: responseData)
 
             if pollResponse.newClientID != 0 {

@@ -71,14 +71,14 @@ class SteamQRAuth {
     func pollForConfirmation() async throws -> (refreshToken: String, accessToken: String, accountName: String) {
         authState = .polling
 
-        let maxAttempts = 120  // ~10 minutes at 5-second intervals
-        for _ in 0..<maxAttempts {
+        let deadline = Date().addingTimeInterval(10 * 60)
+        while Date() < deadline {
             try Task.checkCancellation()
             var pollRequest = CAuthentication_PollAuthSessionStatus_Request()
             pollRequest.clientID = clientID
             pollRequest.requestID = requestIDData
 
-            let responseData = try await callSteamAuthAPI(method: "PollAuthSessionStatus", body: pollRequest.serialize())
+            guard let responseData = try await SteamAuthAPI.poll(body: pollRequest.serialize(), until: deadline) else { break }
             let pollResponse = try CAuthentication_PollAuthSessionStatus_Response.deserialize(from: responseData)
 
             // Update client ID if it changed (Steam may rotate it)
@@ -99,7 +99,7 @@ class SteamQRAuth {
                 return (refreshToken: pollResponse.refreshToken, accessToken: pollResponse.accessToken, accountName: accountName)
             }
 
-            try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+            try await Task.sleep(nanoseconds: UInt64(max(1, pollInterval) * 1_000_000_000))
         }
 
         authState = .expired

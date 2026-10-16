@@ -16,6 +16,10 @@ python3 "$ROOT/tests/wow_window_bounds_test.py"
 python3 "$ROOT/tests/compliance_tools_test.py"
 python3 "$ROOT/tests/app_store_preparation_test.py"
 swiftc --version | head -1
+# Sign-in status polling survives app-switch connection loss without replaying
+# credentials or ignoring cancellation / the original session deadline.
+swiftc -parse-as-library -O -o "$OUT/steam-auth-tests" "$ROOT/App/Sources/Steam/SwiftSteam/Auth/SteamAuthNetwork.swift" "$HERE/steam_auth/main.swift"
+"$OUT/steam-auth-tests" | tee "$OUT/steam-auth-tests.txt"
 # Steam Cloud saves: path mapping, comparison, sync decisions, backup retention.
 swiftc -O -o "$OUT/steam-cloud-tests" "$ROOT/App/Sources/Steam/SteamCloudCore.swift" "$HERE/steam_cloud/main.swift"
 "$OUT/steam-cloud-tests" | tee "$OUT/steam-cloud-tests.txt"
