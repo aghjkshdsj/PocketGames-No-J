@@ -389,7 +389,7 @@ struct ManualTransferSheet: View {
                 } footer: {
                     Text(upload
                          ? "These saves on this iPhone go up to Steam Cloud, where every device signed in to this account (a PC too) gets them. The cloud's copies they replace are downloaded into save-backups first. Nothing is deleted in the cloud."
-                         : "These saves come down from Steam Cloud to where the game reads them. This iPhone's copies they replace go to save-backups first. Nothing is deleted on this iPhone.")
+                         : "These saves come down from Steam Cloud to where the game reads them. This iPhone's copies are backed up before replacement. The five newest backup sets are kept; no files are deleted from Steam Cloud.")
                 }
             }
             .navigationTitle(upload ? "Upload to Steam Cloud" : "Download from Steam Cloud")

@@ -47,6 +47,10 @@ precondition(SteamCloudBackups.list(app, root: backupRoot).count == 4)
 let preservedSave = try Data(contentsOf: currentSave)
 precondition(preservedSave == Data("current progress".utf8))
 precondition(SteamCloudBackups.list(480, root: backupRoot) == [other])
+for number in 7...25 { _ = try make(app, number) }
+let rapid = SteamCloudBackups.list(app, root: backupRoot)
+precondition(Set(rapid.map(\.reason)) == Set((21...25).map { "test \($0)" }), "rapid backups must retain the five latest sets even when folder names are reused")
+precondition(rapid.allSatisfy { $0.preciseCreated != nil })
 do {
     try SteamCloudBackups.delete(app, sixth, root: backupRoot)
     fatalError("A stale selection must fail")

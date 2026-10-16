@@ -24,11 +24,15 @@ struct SteamCloudBackup: Codable, Identifiable, Equatable, Sendable {
     var created: Date
     var reason: String
     var files: [File]
+    /// Older manifests round ISO dates to seconds. Preserve precise ordering
+    /// for rapid backups without changing the date field older builds read.
+    var preciseCreated: Double? = nil
+    var retentionDate: Date { preciseCreated.map { Date(timeIntervalSince1970: $0) } ?? created }
     /// The folder's name (its time), not stored.
     var folder = ""
 
     var id: String { folder }
-    private enum CodingKeys: String, CodingKey { case appID, created, reason, files }
+    private enum CodingKeys: String, CodingKey { case appID, created, reason, files, preciseCreated }
 }
 
 enum SteamCloudBackupError: LocalizedError {
@@ -120,7 +124,8 @@ enum SteamCloudBackups {
             }
             files.append(.init(cloudPath: cloudPath, stored: stored, side: side, size: UInt64(data.count),
                                sha: SteamCloudRecord.hex(SteamCloudTransfer.sha1(data)), time: time))
-            let manifest = SteamCloudBackup(appID: appID, created: created, reason: reason, files: files)
+            let manifest = SteamCloudBackup(appID: appID, created: created, reason: reason, files: files,
+                                           preciseCreated: created.timeIntervalSince1970)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
@@ -164,7 +169,7 @@ enum SteamCloudBackups {
             backup.folder = name
             out.append(backup)
         }
-        return out.sorted { $0.created == $1.created ? $0.folder > $1.folder : $0.created > $1.created }
+        return out.sorted { $0.retentionDate == $1.retentionDate ? $0.folder > $1.folder : $0.retentionDate > $1.retentionDate }
     }
 
     static func delete(_ appID: Int, _ backup: SteamCloudBackup, root: URL = SteamCloudBackups.root) throws {
@@ -178,7 +183,7 @@ enum SteamCloudBackups {
     /// Remove the oldest completed sets once the sixth has been published.
     static func prune(_ appID: Int, keeping: String? = nil, root: URL = SteamCloudBackups.root) throws {
         let all = list(appID, root: root)
-        let drop = SteamCloudBackupRetention.expired(all.map { ($0.folder, $0.created) }, keeping: keeping)
+        let drop = SteamCloudBackupRetention.expired(all.map { ($0.folder, $0.retentionDate) }, keeping: keeping)
         for name in drop {
             guard let backup = all.first(where: { $0.folder == name }) else { continue }
             try delete(appID, backup, root: root)
