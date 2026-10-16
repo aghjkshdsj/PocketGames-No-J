@@ -957,7 +957,7 @@ final class SteamCloudSync: ObservableObject {
         let found = await Task.detached(priority: .utility) { () -> [(String, Int, Date)] in
             let users = drive.appendingPathComponent("users", isDirectory: true)
             let skipped: Set<String> = ["steam", "htmlcache", "temp", "inetcache", "microsoft", "packages", "d3dscache",
-                                        "shadercache", "nvidia", "crashdumps", "webcache", "madeira"]
+                                        "shadercache", "nvidia", "crashdumps", "webcache", "danport"]
             var out: [(String, Int, Date)] = []
             let names = ((try? FileManager.default.contentsOfDirectory(atPath: users.path)) ?? []).sorted()
             for (index, name) in names.enumerated() where !name.hasPrefix(".") {

@@ -12,12 +12,12 @@ what it can and cannot cover.
 Adopted on: 2026-09-24
 By: Will Faust
 
-Madeira is licensed under the GNU General Public License, version 3 or (at
+DanPort is licensed under the GNU General Public License, version 3 or (at
 your option) any later version (see `COPYING`). The following additional
-permission applies to the parts of Madeira whose copyright is held by the
-Madeira authors (see "Scope and authority"):
+permission applies to the parts of DanPort whose copyright is held by the
+DanPort authors (see "Scope and authority"):
 
-### Madeira Converter Exception, version 1 (of 2026-09-16; in effect from the adoption date above)
+### DanPort Converter Exception, version 1 (of 2026-09-16; in effect from the adoption date above)
 
 Additional permission under GNU GPL version 3 section 7.
 
@@ -39,14 +39,14 @@ copies you convey, as GPL-3.0 section 7 allows.
 An additional permission can be attached only by the copyright holder of
 the code it covers. It therefore covers, and only covers:
 
-- the Madeira application and tooling in this repository (all commits are
-  by the Madeira author; contributions are accepted under `CONTRIBUTING.md`,
+- the DanPort application and tooling in this repository (all commits are
+  by the DanPort author; contributions are accepted under `CONTRIBUTING.md`,
   which from this date includes this permission);
-- the native Direct3D 12 runtime in `research/madeira-d3d12` (same author;
+- the native Direct3D 12 runtime in `research/danport-d3d12` (same author;
   its own `LICENSE` file carries the same text);
-- the Madeira-authored modifications in the FEX and DXMT forks and in the
+- the DanPort-authored modifications in the FEX and DXMT forks and in the
   rpmalloc fork under FEX/External (commits by Will Faust), whose
-  `LICENSE-MADEIRA.md` files reproduce this permission in full. Upstream
+  `LICENSE-DANPORT.md` files reproduce this permission in full. Upstream
   FEX and DXMT code is MIT and upstream rpmalloc is 0BSD; Ryan Houdek's
   rpmalloc commits are 0BSD; none needs an exception.
 
@@ -57,13 +57,13 @@ It does NOT cover, and nothing here changes:
   copy and makes the Wine authors' code GPL-only in that tree; no exception
   can be attached to it by anyone but them. The path being prepared is an
   LGPL branch built from the upstream wine-11.4 baseline with the
-  Madeira-authored patches reapplied under LGPL-2.1-or-later, documented in
+  DanPort-authored patches reapplied under LGPL-2.1-or-later, documented in
   `docs/wine-lgpl-provenance.md`;
 - the Apple libraries themselves. The converter library is tracked in this
   repository (whether that co-location, or the built app, forms a combined
   work with the GPL code is a question for the legal review, not settled by
   this file) and it is distributed only under Apple's agreement
-  (`app/Madeira/d3d12/METAL-SHADER-CONVERTER-AGREEMENT.txt`, section 2.B:
+  (`app/DanPort/d3d12/METAL-SHADER-CONVERTER-AGREEMENT.txt`, section 2.B:
   distribution "for the sole purpose of shader conversion").
 
 This file is a licensing statement by the copyright holder, not legal

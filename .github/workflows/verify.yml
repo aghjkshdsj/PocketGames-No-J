@@ -10,6 +10,10 @@ on:
         description: Compile the iOS app as well as running host tests
         type: boolean
         default: true
+      fast_compile:
+        description: Check interfaces and linking without expensive interpreter optimization
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
@@ -23,6 +27,13 @@ jobs:
         run: |
           mkdir -p App/Generated/PE
           brew install xcodegen
+          if [ "${{ github.event_name }}" != workflow_dispatch ] || [ "${{ inputs.fast_compile }}" = true ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('project.yml')
+          p.write_text(p.read_text().replace('"-O2"', '"-O0"'))
+          PY
+          fi
           xcodegen generate
       - name: Compile app with built-in interpreters
         run: |
@@ -45,3 +56,5 @@ jobs:
           fi
       - name: Host tests on a case-sensitive filesystem
         run: bash tests/host/run.sh "$RUNNER_TEMP/tests"
+      - name: Dependency namespace checks
+        run: python3 tests/port_source_test.py

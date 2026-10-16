@@ -3,7 +3,7 @@
 // Without JIT this is FXI32's front end (docs/INTERPRETERS.md, stage 3): wow64.dll's BTCpu*
 // interface, with the x86 code interpreted by FXI32 in the app (App/Sources/Native/fxi_wow_host.c).
 //
-// The contract is Wine's dlls/wow64/syscall.c and Madeira's FEX WOW64 module
+// The contract is Wine's dlls/wow64/syscall.c and DanPort's FEX WOW64 module
 // (Source/Windows/WOW64/Module.cpp, MIT; Thanks to André Zwing's hangover for the original
 // ideas): guest addresses below 4 GB in the process's window [B, B + 4 GB), the BOP page whose
 // guest address wow64 stores in the 32-bit ntdll, the CPU area as the 32-bit register state

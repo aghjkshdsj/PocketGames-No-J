@@ -218,7 +218,7 @@ actor SteamRuntimeInstaller {
         guard !fm.fileExists(atPath: root.appendingPathComponent("steam.exe").path) else {
             throw SteamRuntimeFiles.Failure.conflict
         }
-        let stage = fm.temporaryDirectory.appendingPathComponent("madeira-runtime-" + UUID().uuidString)
+        let stage = fm.temporaryDirectory.appendingPathComponent("danport-runtime-" + UUID().uuidString)
         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: stage) }
         let configuration = URLSessionConfiguration.ephemeral

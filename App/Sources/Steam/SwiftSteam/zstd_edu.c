@@ -44,8 +44,8 @@
 
 /// This decoder calls exit(1) when it encounters an error, however a production
 /// library should propagate error codes.
-/// Patched (error-safe wrapper from Jfishin's Madeira Steam client, used with
-/// the author's permission; serialized across threads by Madeira): when
+/// Patched (error-safe wrapper from Jfishin's DanPort Steam client, used with
+/// the author's permission; serialized across threads by DanPort): when
 /// zstd_safe_decompress arms the jump buffer, errors longjmp back to it
 /// instead of exiting the process.
 #include <setjmp.h>

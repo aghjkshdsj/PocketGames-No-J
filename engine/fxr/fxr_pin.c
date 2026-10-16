@@ -124,7 +124,7 @@ PX p_slow(FXR_PARAMS) {
 // reads its thread's TLS slots and takes a lock around most runtime calls), and every call paid a
 // full transition to native code and back (spill, the glue, the ARM64EC entry thunk, a block
 // lookup on return). These handlers run Wine's own code paths on the same fields instead
-// (Madeira's Wine: dlls/kernelbase/thread.c TlsGetValue; dlls/ntdll/sync.c RtlTryEnterCriticalSection
+// (DanPort's Wine: dlls/kernelbase/thread.c TlsGetValue; dlls/ntdll/sync.c RtlTryEnterCriticalSection
 // and RtlLeaveCriticalSection), with the same atomics, so x64 and native callers share a lock.
 // Whatever needs Wine (a lock held by another thread, waiters to wake, a section not acquired)
 // leaves for Wine's function as before: p_slow runs the exit block's ec_exit, nothing changed.

@@ -1,10 +1,13 @@
 name: Stage 2 - Wine unix side
 
 # Builds Wine's unix side for iOS (ntdll, win32u, wineserver) as static
-# libraries from Madeira's iOS port. Separate from the IPA build until the
+# libraries from DanPort's iOS port. Separate from the IPA build until the
 # libraries link into the app.
 on:
   workflow_dispatch:
+
+env:
+  GH_TOKEN: ${{ github.token }}
 
 permissions:
   contents: read
@@ -28,14 +31,14 @@ jobs:
 
       # Restore/save separately so partial progress (configure, deps) is kept
       # even when a later step fails.
-      - name: Restore Madeira checkout, Wine build tree and iOS deps
+      - name: Restore DanPort checkout, Wine build tree and iOS deps
         uses: actions/cache/restore@v4
         with:
-          path: engine/wine/madeira
+          path: engine/wine/danport
           key: wine-unix-${{ hashFiles('engine/wine/PIN') }}-v1-${{ github.run_id }}
           restore-keys: wine-unix-${{ hashFiles('engine/wine/PIN') }}-v1-
 
-      - name: Fetch Madeira + Wine fork
+      - name: Fetch DanPort + Wine fork
         run: bash engine/wine/build-unix.sh fetch
 
       - name: Configure Wine (build-macos) + generated headers
@@ -81,7 +84,7 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: engine/wine/madeira
+          path: engine/wine/danport
           key: wine-unix-${{ hashFiles('engine/wine/PIN') }}-v1-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v5
@@ -96,8 +99,8 @@ jobs:
         with:
           name: wine-unix-logs
           path: |
-            engine/wine/madeira/wine/build-macos/*.log
-            engine/wine/madeira/build/*/obj/*.err
+            engine/wine/danport/wine/build-macos/*.log
+            engine/wine/danport/build/*/obj/*.err
             engine/wine/obj-wineserver/*.err
           if-no-files-found: ignore
 

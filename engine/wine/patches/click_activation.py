@@ -3,7 +3,7 @@
 """A click on a dialog's button must reach the button (Steins;Gate's launcher: no button worked).
 
 Before a WM_LBUTTONDOWN reaches a window that is not the active one, win32u activates its top
-window (process_mouse_message, Madeira's message_ios.c): NtUserGetAncestor(button, GA_ROOT),
+window (process_mouse_message, DanPort's message_ios.c): NtUserGetAncestor(button, GA_ROOT),
 WM_MOUSEACTIVATE, then set_foreground_window(top); when that fails the button-down is eaten.
 In a game-mode session GA_ROOT came back 0 for the launcher's buttons (the trace showed
 WM_MOUSEACTIVATE with wparam 0, then WM_LBUTTONUP without its WM_LBUTTONDOWN), so every click
@@ -14,7 +14,7 @@ lost its button-down and no button ever fired, Quit included.
 - build/win32u-unix/message_ios.c: a click whose top window cannot be activated is delivered
   anyway (Windows gives a clicked window the foreground), with one log line.
 Both change only cases that lost the click; every lookup and activation that works is as before.
-Usage: click_activation.py <madeira checkout>
+Usage: click_activation.py <danport checkout>
 """
 import sys
 

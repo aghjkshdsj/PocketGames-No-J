@@ -57,10 +57,10 @@ targets:
         excludes: ["fxi_main.c", "native.c", "*.sh", "*.inc", "*.h"]   # headers stay out of the header map: FXI has the same names
         # No tail merging: each edge of a branch handler keeps its own indirect jump (fxr/build.sh).
         compilerFlags: ["-O2", "-ffp-contract=off", "-mllvm", "-enable-tail-merge=false"]
-      # Stage 2 (Wine): engine/wine/stage-app.sh inserts Madeira's app-side sources
+      # Stage 2 (Wine): engine/wine/stage-app.sh inserts DanPort's app-side sources
       # and the Windows side (DLL farm, NLS, prefix) here when it staged them.
       # @WINE_SOURCES@
-      # Stage 3 (DXMT): engine/dxmt/stage-app.sh inserts Madeira's d3d12/ folder here.
+      # Stage 3 (DXMT): engine/dxmt/stage-app.sh inserts DanPort's d3d12/ folder here.
       # @DXMT_SOURCES@
       # No-JIT spike: Windows DLLs wrapped as signed dylibs (engine/pedylib/link-dylibs.sh).
       - path: App/Generated/PE

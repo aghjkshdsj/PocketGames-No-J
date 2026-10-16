@@ -5,6 +5,9 @@ name: Stage 3 - DXMT (Direct3D on Metal)
 on:
   workflow_dispatch:
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
 permissions:
   contents: read
   actions: write
@@ -23,14 +26,14 @@ jobs:
       - name: Host tools
         run: brew install ninja meson || true
 
-      - name: Restore Madeira, DXMT and LLVM build
+      - name: Restore DanPort, DXMT and LLVM build
         uses: actions/cache/restore@v4
         with:
-          path: engine/dxmt/madeira
+          path: engine/dxmt/danport
           key: dxmt-${{ hashFiles('engine/dxmt/PIN') }}-v1-${{ github.run_id }}
           restore-keys: dxmt-${{ hashFiles('engine/dxmt/PIN') }}-v1-
 
-      - name: Fetch Madeira + DXMT + LLVM 15 sources
+      - name: Fetch DanPort + DXMT + LLVM 15 sources
         run: bash engine/dxmt/build-unix.sh fetch
 
       - name: LLVM 15 for iOS
@@ -56,7 +59,7 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: engine/dxmt/madeira
+          path: engine/dxmt/danport
           key: dxmt-${{ hashFiles('engine/dxmt/PIN') }}-v1-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v5
@@ -70,8 +73,8 @@ jobs:
         with:
           name: dxmt-logs
           path: |
-            engine/dxmt/madeira/toolchains/llvm-ios-ninja.log
-            engine/dxmt/madeira/build/dxmt-ios/obj/*.err
+            engine/dxmt/danport/toolchains/llvm-ios-ninja.log
+            engine/dxmt/danport/build/dxmt-ios/obj/*.err
           if-no-files-found: ignore
 
       - name: Rebuild the IPA with this library

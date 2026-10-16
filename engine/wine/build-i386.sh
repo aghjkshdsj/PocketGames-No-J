@@ -1,28 +1,28 @@
 #!/bin/bash
 # The 32-bit (i386) Windows DLL farm for WoW64 sessions (docs/INTERPRETERS.md, stage 1):
-# bundled as i386-windows, linked by Madeira's launch path as C:\windows\syswow64. Every file is
+# bundled as i386-windows, linked by DanPort's launch path as C:\windows\syswow64. Every file is
 # x86 code, i.e. data inside a 32-bit process's guest window, decoded by the interpreter (or by
 # FEX with JIT): nothing here becomes a signed dylib, so the default 4 KB sections are fine.
 #
-# Madeira's build/wine-i386/build.sh, with this repository's paths (the Wine stage's checkout,
-# engine/wine/madeira) and DXMT built the way engine/dxmt/build-pe.sh builds the ARM64EC set:
+# DanPort's build/wine-i386/build.sh, with this repository's paths (the Wine stage's checkout,
+# engine/wine/danport) and DXMT built the way engine/dxmt/build-pe.sh builds the ARM64EC set:
 #   wine     every module the configured i386 tree has a rule for, minus the SKIP list (a
 #            32-bit program that imports one missing DLL never starts, and there is no way to
 #            find the gap but running it: so the farm is everything, not a hand-made list)
 #   dxmt     DXMT's i386 d3d11/dxgi/d3d10core/winemetal, the D3D9 shim (d3d9.dll, d3d9shim.dll)
 #            and the emulated D3D9 frontend (d3d9-emulated.dll), against that tree
-#   extras   Madeira's hello-x86.exe (tests/x86: kernel32 only, prints a line, exits 42)
+#   extras   DanPort's hello-x86.exe (tests/x86: kernel32 only, prints a line, exits 42)
 #   a64      the WoW64 host side's wow64win.dll (aarch64), patched to keep atoms (step_a64)
 #   collect  strip into engine/wine/out-i386/i386-windows; fails on a missing import
 #
 #   engine/wine/build-i386.sh <step>     fetch | wine | dxmt | extras | a64 | collect | all
-# macOS host (Wine's configure and DXMT's Metal shaders, as Madeira builds it).
+# macOS host (Wine's configure and DXMT's Metal shaders, as DanPort builds it).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/engine/wine/PIN"
 DXMT_PIN_SHA="$(sed -n 's/^DXMT_SHA=//p' "$ROOT/engine/dxmt/PIN")"
-M="$ROOT/engine/wine/madeira"     # Madeira + its Wine fork + llvm-mingw (build-unix.sh fetch)
+M="$ROOT/engine/wine/danport"     # DanPort + its Wine fork + llvm-mingw (build-unix.sh fetch)
 W="$M/wine"
 B="$W/build-i386"
 TC="$M/toolchains/$LLVM_MINGW/bin"
@@ -35,13 +35,15 @@ step_fetch() {
     bash "$ROOT/engine/wine/build-unix.sh" fetch
     if [ "$(git -C "$M/dxmt" rev-parse HEAD 2>/dev/null)" != "$DXMT_PIN_SHA" ]; then
         git -C "$M" submodule update --init --depth 1 dxmt
+        python3 "$ROOT/tools/port_source.py" normalize "$M"
     fi
     git -C "$M/dxmt" rev-parse HEAD
     git -C "$M/dxmt" submodule update --init --depth 1 --recursive
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     "$TC/i686-w64-mingw32-clang" --version | head -1
 }
 
-# What goes in: Madeira's policy, each skipped name with its reason.
+# What goes in: DanPort's policy, each skipped name with its reason.
 SKIP_REASON=(
   "cng.sys|fltmgr.sys|hidclass.sys|hidparse.sys|http.sys|ksecdd.sys|mouhid.sys|mountmgr.sys|ndis.sys|netio.sys|nsiproxy.sys|scsiport.sys|tdi.sys|usbd.sys|winebth.sys|winebus.sys|winehid.sys|winexinput.sys|wmilib.sys=kernel drivers: under WoW64 drivers are 64-bit only"
   "ntoskrnl.exe|winedevice.exe=the driver world (see .sys)"
@@ -65,13 +67,14 @@ is_in() { local x="$1"; shift; for y in "$@"; do [ "$x" = "$y" ] && return 0; do
 
 step_wine() {
     # The 32-bit dinput's iOS pad gets an Rz axis and trigger buttons (patches/dinput_ios_pad.py),
-    # from the pristine file. 64-bit games keep Madeira's prebuilt dinput.
+    # from the pristine file. 64-bit games keep DanPort's prebuilt dinput.
     git -C "$W" checkout -- dlls/dinput/joystick_ios.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     python3 "$ROOT/engine/wine/patches/dinput_ios_pad.py" "$W"
     mkdir -p "$B"
     cd "$B"
     if [ ! -f config.status ]; then
-        # Madeira's flags. --enable-winegstreamer: the PE half never touches GStreamer, but
+        # DanPort's flags. --enable-winegstreamer: the PE half never touches GStreamer, but
         # configure drops the module without GStreamer's development files.
         ../configure --enable-archs=i386 --without-x --without-vulkan --without-freetype --without-gnutls \
             --disable-tests --enable-winegstreamer > configure.log 2>&1 || { tail -60 configure.log; return 1; }
@@ -136,7 +139,7 @@ EOF
 
 step_extras() {
     mkdir -p "$OUT/extras"
-    # Madeira tests/x86/build.sh hello-x86: no CRT, kernel32 only.
+    # DanPort tests/x86/build.sh hello-x86: no CRT, kernel32 only.
     i686-w64-mingw32-clang -O2 -nostdlib -Wl,--entry=_start -o "$OUT/extras/hello-x86.exe" \
         "$M/tests/x86/hello-x86.c" -lkernel32
     llvm-readobj --file-headers --coff-imports "$OUT/extras/hello-x86.exe" | grep -E 'Machine|Name:' || true
@@ -144,11 +147,11 @@ step_extras() {
 
 # The WoW64 host side's wow64win.dll (aarch64), rebuilt from the same Wine fork with
 # engine/wine/patches/wow64win_atoms.py: atoms and resource IDs pass its thunks unchanged
-# (Madeira's prebuilt copy turns the dialog class 0x8002 into a pointer, and win32u faults on
+# (DanPort's prebuilt copy turns the dialog class 0x8002 into a pointer, and win32u faults on
 # it). winegcc links ARM64 PE files with 64 KB sections and file alignment by itself, as
-# Madeira's (a separate --section-alignment conflicts with its file alignment: lld then rejects
+# DanPort's (a separate --section-alignment conflicts with its file alignment: lld then rejects
 # misaligned loads), so pe2dylib converts it like the rest of the aarch64 farm; build-ipa.yml
-# puts it over Madeira's copy. Its exports and imports must equal the prebuilt one's.
+# puts it over DanPort's copy. Its exports and imports must equal the prebuilt one's.
 A="$W/build-a64"
 A64_OUT="$OUT/aarch64-windows"
 step_a64() {
@@ -163,18 +166,18 @@ step_a64() {
     make -j"$JOBS" "$t" > make-a64.log 2>&1 || { grep -E 'error:|Error [0-9]' make-a64.log | head -40; return 1; }
     mkdir -p "$A64_OUT"
     aarch64-w64-mingw32-strip --strip-debug -o "$A64_OUT/wow64win.dll" "$t"
-    local ref="$M/app/Madeira/aarch64-windows/wow64win.dll" diffs=0 what
+    local ref="$M/app/DanPort/aarch64-windows/wow64win.dll" diffs=0 what
     [ -f "$ref" ] || { echo "no prebuilt wow64win.dll at $ref to compare with" >&2; return 1; }
     llvm-readobj --file-headers "$A64_OUT/wow64win.dll" | grep -E 'Machine|SectionAlignment'
     for what in coff-exports coff-imports; do
         if ! diff <(llvm-readobj --"$what" "$ref" | grep -E '^ *Name:' | sort) \
                   <(llvm-readobj --"$what" "$A64_OUT/wow64win.dll" | grep -E '^ *Name:' | sort); then
-            echo "wow64win.dll: $what differ from Madeira's prebuilt copy" >&2
+            echo "wow64win.dll: $what differ from DanPort's prebuilt copy" >&2
             diffs=1
         fi
     done
     [ "$diffs" = 0 ]
-    echo "== wow64win.dll (aarch64, atoms kept): $(wc -c < "$A64_OUT/wow64win.dll" | tr -d ' ') bytes, exports and imports as Madeira's =="
+    echo "== wow64win.dll (aarch64, atoms kept): $(wc -c < "$A64_OUT/wow64win.dll" | tr -d ' ') bytes, exports and imports as DanPort's =="
 }
 
 step_collect() {
@@ -195,7 +198,7 @@ step_collect() {
         i686-w64-mingw32-strip -o "$FARM/$(basename "$f")" "$DB/$f"
     done
     # The shim is what programs load as d3d9.dll; the emulated frontend (meson's d3d9.dll)
-    # ships beside it as d3d9-emulated.dll (Madeira docs/WOW64.md, Direct3D 9).
+    # ships beside it as d3d9-emulated.dll (DanPort docs/WOW64.md, Direct3D 9).
     i686-w64-mingw32-strip -o "$FARM/d3d9.dll" "$DB/d3d9shim/d3d9shim.dll"
     i686-w64-mingw32-strip -o "$FARM/d3d9shim.dll" "$DB/d3d9shim/d3d9shim.dll"
     i686-w64-mingw32-strip -o "$FARM/d3d9-emulated.dll" "$DB/d3d9/d3d9.dll"

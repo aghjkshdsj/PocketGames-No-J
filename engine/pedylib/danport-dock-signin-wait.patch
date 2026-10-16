@@ -5,11 +5,11 @@
  }
  
 +/* PocketGamesNoJ: how long to wait for Valve's client to sign in and confirm the licence.
-+ * Madeira's 90 s stays the default; MADEIRA_DOCK_SIGNIN_MS (90000..900000) gives a
++ * DanPort's 90 s stays the default; DANPORT_DOCK_SIGNIN_MS (90000..900000) gives a
 + * client running in an interpreter, without JIT, the time its TLS and logon take there. */
 +static uint64_t signin_wait_ms(void)
 +{
-+    const char *s = getenv("MADEIRA_DOCK_SIGNIN_MS");
++    const char *s = getenv("DANPORT_DOCK_SIGNIN_MS");
 +    unsigned long v = s ? strtoul(s, NULL, 10) : 0;
 +    return v >= 90000 && v <= 900000 ? v : 90000;
 +}
@@ -34,12 +34,12 @@
  #define SH_CONFIG_RETRY_MS 5000
  #define SH_SESSION_WAIT_MS (3ULL * 60 * 1000)  /* ml2015 */
  #define SH_SESSION_RETRY_MS 15000
-+/* PocketGamesNoJ: MADEIRA_DOCK_SIGNIN_MS (90000..900000) also lengthens the wait for the game
++/* PocketGamesNoJ: DANPORT_DOCK_SIGNIN_MS (90000..900000) also lengthens the wait for the game
 + * process to start, for a client running in an interpreter without JIT. */
 +#include <stdlib.h>
 +static unsigned long long sh_start_wait_ms(void)
 +{
-+    const char *s = getenv("MADEIRA_DOCK_SIGNIN_MS");
++    const char *s = getenv("DANPORT_DOCK_SIGNIN_MS");
 +    unsigned long v = s ? strtoul(s, NULL, 10) : 0;
 +    return v >= 90000 && v <= 900000 ? v : 90000;
 +}

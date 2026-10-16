@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """No-JIT step 4 (docs/INTERPRETERS.md): child pseudo-processes get their own ntdll.
 
-With JIT, Madeira gives a child a private copy of ntdll at the SAME addresses, redirected per
+With JIT, DanPort gives a child a private copy of ntdll at the SAME addresses, redirected per
 process through the JIT pool's owner-aware translation (ios_jit_copy_module_for_child). Without
 JIT there is no pool: the copy fails and the child falls back to the parent's ntdll, whose
 module list and loader lock then collide (build 64: the child crashed in ntdll's loader and
 the parent hung at exit).
 
-Madeira already has a second path: ios_load_child_ec_ntdll loads a private ntdll image through
+DanPort already has a second path: ios_load_child_ec_ntdll loads a private ntdll image through
 the normal map pipeline and registers it for the child's PEB (ios_set_proc_ntdll), for
 cross-architecture children. Without JIT, every child takes that path; the no-JIT map hook
 (nojit_dylib.py) answers the second mapping of ntdll.dll (and of every other DLL the child
@@ -20,7 +20,7 @@ starting Game.exe: "FAILED to load .../x86_64-windows/ntdll.dll", the child neve
 i386 child the function loads that one instead (the map hook answers it with a new instance of
 the aarch64 dylib, PE/wine-a64).
 
-Usage: nojit_child.py <madeira checkout>. Idempotent (marker line).
+Usage: nojit_child.py <danport checkout>. Idempotent (marker line).
 """
 import sys
 

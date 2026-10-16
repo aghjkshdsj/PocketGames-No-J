@@ -5,10 +5,10 @@
 Win32 passes MAKEINTATOM / MAKEINTRESOURCE numbers where a string pointer may go (a window class
 such as the dialog class #32770 = 0x8002, a menu or icon resource ID), and the callee tells them
 apart with IS_INTRESOURCE(), i.e. value >> 16 == 0. Upstream's guest_ptr32() is the identity, so
-the number survives every thunk. Madeira's adds the guest window's base B, so 0x8002 reaches
+the number survives every thunk. DanPort's adds the guest window's base B, so 0x8002 reaches
 win32u as B + 0x8002: IS_INTRESOURCE() is false and the callee reads a string from the
 never-mapped first 64 KB of the window (Steins;Gate's launcher: NtUserCreateWindowEx ->
-wine_dbgstr_wn faults on B + 0x8002 creating its dialog, and the process dies). Madeira guards
+wine_dbgstr_wn faults on B + 0x8002 creating its dialog, and the process dies). DanPort guards
 three property calls (get_str_or_atom); every class name, window name, menu name and icon
 resource that goes through unicode_str_32to64, WNDCLASSEXW or client_menu_name has the same
 problem, in both directions (host_ptr32 turned a returned resource ID into ID - B).
@@ -16,7 +16,7 @@ problem, in both directions (host_ptr32 turned a returned resource ID into ID - 
 Below 64 KB nothing is mapped in a Windows process, so the two converters keep such values as
 they are, as upstream does: atoms and resource IDs work in every thunk, and a small invalid
 pointer still faults (iOS maps nothing below 4 GB of a 64-bit process). wow64win.dll only runs
-in 32-bit (WoW64) processes. Applies to Madeira's Wine fork. Usage: wow64win_atoms.py <wine tree>
+in 32-bit (WoW64) processes. Applies to DanPort's Wine fork. Usage: wow64win_atoms.py <wine tree>
 """
 import sys
 

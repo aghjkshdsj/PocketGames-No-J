@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Big-number arithmetic as TLS libraries run it: Montgomery multiplication with long mul/adc
 // carry chains and a final subtraction whose sbb borrow crosses a dec + jne. Valve's Steam client
-// (Madeira Dock) spends its HTTPS setup in exactly this code (OpenSSL's bn_mul_mont, generic
+// (DanPort Dock) spends its HTTPS setup in exactly this code (OpenSSL's bn_mul_mont, generic
 // path, which elliptic-curve and small moduli take), so FXI and FXR must compute it bit for bit.
 // gmont below follows the instruction sequence of that routine (OpenSSL crypto/bn/asm/
 // x86_64-mont.pl, its 1x loop) with System V arguments; ref_mont is the same product in plain C.

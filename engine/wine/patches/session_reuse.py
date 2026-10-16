@@ -2,18 +2,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Session reuse (docs/SESSION_REUSE.md): another game starts in the running Wine session.
 
-Madeira runs one Wine session per app run: its wineserver cannot start a second time in one
+DanPort runs one Wine session per app run: its wineserver cannot start a second time in one
 process (init_registry aborts on "\\Registry"), and __wine_main's session-wide setup (virtual_init,
 the signal and Mach handlers, the first TEB) cannot run twice either. A Wine session can still
 hold more than one top-level program, as on a desktop where `wine b.exe` joins the wineserver
 `wine a.exe` started: the server takes any number of clients (request_ios.c,
-master_socket_handle_client is create_process with no parent), and Madeira already brings
+master_socket_handle_client is create_process with no parent), and DanPort already brings
 processes up inside a running session for a program's children (loader_ios.c,
 wine_ios_child_main). A program with no parent gets no startup info from the server, so the
 loader builds its process from argv and the environment, as for the session's first program
 (env_ios.c, build_initial_params).
 
-  app    app/Madeira/WineProcessBridge.m (engine/wine/stage-app.sh): with
+  app    app/DanPort/WineProcessBridge.m (engine/wine/stage-app.sh): with
          PocketGamesNoJ_SESSION_REUSE=1 a session's end leaves the wineserver running, and the next
          wine_process_start boots its program through wine_ios_child_main on a new socketpair
          instead of __wine_main. Without the variable nothing changes.
@@ -33,7 +33,7 @@ loader builds its process from argv and the environment, as for the session's fi
          taken from the shared slot only when it is that window's (WINDOW_FIXES, below); and
          build/win32u-unix/class_ios.c: [winproc] diagnostics.
 
-Usage: session_reuse.py <madeira checkout> app|ntdll|server|win32u. Idempotent (marker line).
+Usage: session_reuse.py <danport checkout> app|ntdll|server|win32u. Idempotent (marker line).
 """
 import sys
 
@@ -58,7 +58,7 @@ extern void ios_child_boot_unlock(void);                 /* loader_ios.c */
 extern void ios_wow_window_release_current(void);        /* virtual_ios.c */
 extern void ios_wow_window_retire_current(void);         /* virtual_ios.c */
 extern pthread_key_t ios_teb_tls_key;
-extern int madeira_live_game_children(char *buf, int len, double max_age);   /* process_ios.c */
+extern int danport_live_game_children(char *buf, int len, double max_age);   /* process_ios.c */
 extern volatile int g_pocketgamesnoj_force_quits __attribute__((weak));   /* request_ios.c: the app's Force quits */
 static int g_force_quits_at_start;   /* their count when this program started */
 static int pocketgamesnoj_session_reuse(void)
@@ -88,7 +88,7 @@ APP_FIXES = [
      '    if (g_session_booted) g_next_fd = pair[1];   /* PocketGamesNoJ session reuse: a later program */\n'
      '    else setenv("WINESERVERSOCKET", fd_str, 1);\n'),
     # A later program of the other kind (a 64-bit game after a 32-bit one, or the reverse) runs as
-    # Madeira's cross-architecture children do: system32 stays the session's farm, whose ntdll and
+    # DanPort's cross-architecture children do: system32 stays the session's farm, whose ntdll and
     # system DLLs the running session uses (an x64 process finds its own in sysx64, a 32-bit one
     # its wow64 DLLs, which only the aarch64 farm has and which are linked into an ARM64EC
     # system32 as non-colliding names). Relinking it to the new program's farm would swap the
@@ -101,12 +101,12 @@ APP_FIXES = [
     ("        char exe_path[512];\n", "        static char exe_path[512];   /* PocketGamesNoJ session reuse: main_argv[1] */\n"),
     ("        char *argv[72];\n", "        static char *argv[72];   /* PocketGamesNoJ session reuse: main_argv */\n"),
     # An earlier program's working folder is not this one's.
-    ('        const char *launch_workdir = getenv("MADEIRA_WORKDIR");',
-     '        if (g_session_booted) unsetenv("MADEIRA_INITIAL_CWD");   /* PocketGamesNoJ session reuse */\n'
-     '        const char *launch_workdir = getenv("MADEIRA_WORKDIR");'),
+    ('        const char *launch_workdir = getenv("DANPORT_WORKDIR");',
+     '        if (g_session_booted) unsetenv("DANPORT_INITIAL_CWD");   /* PocketGamesNoJ session reuse */\n'
+     '        const char *launch_workdir = getenv("DANPORT_WORKDIR");'),
     # The boot: __wine_main once, then wine_ios_child_main for every later program.
     ("        ios_main_image_i386 = is_i386_target ? 1 : 0;\n"
-     "        madeira_publish_host_probe();   /* both FEX modules read it (A12/A13: FlagM, FlagM2) */\n"
+     "        danport_publish_host_probe();   /* both FEX modules read it (A12/A13: FlagM, FlagM2) */\n"
      "\n"
      "        if (setjmp(wine_ios_exit_jmpbuf) == 0) {\n"
      "            __wine_main(argc, argv);\n"
@@ -118,8 +118,8 @@ APP_FIXES = [
      "         * (the unix side read it when the session started) and boots like a child. */\n"
      "        volatile int next_program = g_session_booted;\n"
      "        if (!next_program) ios_main_image_i386 = is_i386_target ? 1 : 0;\n"
-     "        madeira_publish_host_probe();   /* both FEX modules read it (A12/A13: FlagM, FlagM2) */\n"
-     "        g_stale_children = next_program ? madeira_live_game_children(NULL, 0, -1.0) : 0;\n"
+     "        danport_publish_host_probe();   /* both FEX modules read it (A12/A13: FlagM, FlagM2) */\n"
+     "        g_stale_children = next_program ? danport_live_game_children(NULL, 0, -1.0) : 0;\n"
      "        g_force_quits_at_start = pocketgamesnoj_force_quits();\n"
      "\n"
      "        if (setjmp(wine_ios_exit_jmpbuf) == 0) {\n"
@@ -153,9 +153,9 @@ APP_FIXES = [
     # 3 s after the app's Force quit, does a child whose main thread never got back to its start
     # (build 171: the last Steins;Gate's Game.exe ran its exit path, then faulted in a unix call
     # with its window already released, and the session waited for its slot for good).
-    ("                while ((n = madeira_live_game_children(names, sizeof names, -1.0)) > 0) {\n",
+    ("                while ((n = danport_live_game_children(names, sizeof names, -1.0)) > 0) {\n",
      "                unsigned forced_ticks = 0;   /* PocketGamesNoJ session reuse */\n"
-     "                while ((n = madeira_live_game_children(names, sizeof names, -1.0)) > g_stale_children) {   /* PocketGamesNoJ */\n"
+     "                while ((n = danport_live_game_children(names, sizeof names, -1.0)) > g_stale_children) {   /* PocketGamesNoJ */\n"
      "                    if (pocketgamesnoj_force_quits() != g_force_quits_at_start && ++forced_ticks > 15) {\n"
      '                        dprintf(STDERR_FILENO, "[session-reuse] Force quit 3 s ago and %d child process(es) (%s) "\n'
      '                                "still hold their slot: a thread of theirs never got back to its start; the "\n'
@@ -314,7 +314,7 @@ KILLED_FIXES = [
     # for every pseudo-process. The second Game.exe's first exiting thread got the first Game.exe's
     # last TEB: build 162 freed it into the new process's TEB block, so a later thread of the new
     # game got a TEB in the old window (its x86 stack then went wrong, log 96); with the old window
-    # torn down (builds 163-166) the read faulted until Madeira ended the app (crash log 9,
+    # torn down (builds 163-166) the read faulted until DanPort ended the app (crash log 9,
     # exit_thread+0x88 reading 0x72002f03a0). The TEB is a global the window teardown can clear,
     # and only a TEB of the same process is joined and freed.
     ("static DECLSPEC_NORETURN void exit_thread( int status )\n"
@@ -336,7 +336,7 @@ KILLED_FIXES = [
 # the server killing its threads; a thread learns it from its next server request (the pipe is
 # closed) and exits there. DXMT's encode, finish and other worker threads sleep in address waits
 # (NtWaitForAlertByThreadId) or delays that never ask the server, so they stayed (6 per D3D game,
-# build 159), their TEBs inside the guest window, and Madeira keeps a window while a thread of it
+# build 159), their TEBs inside the guest window, and DanPort keeps a window while a thread of it
 # lives (ios_thread_registry_range_busy): its gigabytes never came back. pocketgamesnoj_reap_alert()
 # wakes such a thread and moves a generation; a thread that sees a new generation when it wakes
 # or enters a wait asks the server about itself, and a killed one exits right there (abort_thread)
@@ -755,7 +755,7 @@ FORCE_FD_FIXES = [
 # 64 KB (never code), are logged as [winproc] lines, 300 per run.
 WIN32U_HELPER = MARK + r'''
 extern ULONG_PTR ios_wow_base(void);
-extern void mid_log( const char *fmt, ... );   /* the app's log (App/Sources/Native/runtime_support.c): not through madeira-log.txt */
+extern void mid_log( const char *fmt, ... );   /* the app's log (App/Sources/Native/runtime_support.c): not through danport-log.txt */
 static unsigned int pocketgamesnoj_winproc_lines;
 static void pocketgamesnoj_winproc_note( const WINDOWPROC *proc, WNDPROC func, BOOL ansi, void *caller )
 {
@@ -841,7 +841,7 @@ def apply(path, fixes, what):
 def main():
     root, what = sys.argv[1], sys.argv[2]
     if what == "app":
-        apply(root + "/app/Madeira/WineProcessBridge.m", APP_FIXES, what)
+        apply(root + "/app/DanPort/WineProcessBridge.m", APP_FIXES, what)
     elif what == "ntdll":
         apply(root + "/build/ntdll-unix/server_ios.c", NTDLL_FIXES, what)
         apply(root + "/build/ntdll-unix/thread_ios.c", KILLED_FIXES, what + " thread_ios.c")
@@ -858,7 +858,7 @@ def main():
         apply(root + "/build/win32u-unix/class_ios.c", WIN32U_FIXES, what)
         apply(root + "/wine/dlls/win32u/window.c", WINDOW_FIXES, what + " window.c")
     else:
-        sys.exit("usage: session_reuse.py <madeira checkout> app|ntdll|server|win32u")
+        sys.exit("usage: session_reuse.py <danport checkout> app|ntdll|server|win32u")
 
 
 if __name__ == "__main__":

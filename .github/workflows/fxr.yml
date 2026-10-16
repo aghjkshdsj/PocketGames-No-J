@@ -2,7 +2,7 @@ name: FXR interpreter
 
 # FXR = FXI with the guest registers pinned in host registers (engine/fxr), the fast no-JIT engine.
 # Guests are built once on x86 (gcc), then on the ARM64 and x86 runners: correctness gates for FXR
-# and FXI (hello; atomics, x87, difftest identical to native; --scan-pe of Madeira's x64 programs),
+# and FXI (hello; atomics, x87, difftest identical to native; --scan-pe of DanPort's x64 programs),
 # then speed as a share of native on the standard and held-out sets (engine/fxr/compare.sh: median
 # of 5, rotating order, checksums must match; native = the same clang 19 at -O2 -ffp-contract=off).
 # Plus an iOS compile check (the app links FXR next to FXI, so no global fxi_* symbols).
@@ -11,6 +11,9 @@ on:
     branches: ["main", "claude/**"]
     paths: ["engine/fxr/**", "!engine/fxr/corpus.sh", "engine/fxr-probe/**", "engine/fxi/**", "engine/guest/**", ".github/workflows/fxr.yml"]
   workflow_dispatch:
+
+env:
+  GH_TOKEN: ${{ github.token }}
 
 permissions:
   contents: read
@@ -36,13 +39,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/native-out"
           for t in atomics x87 difftest bignum; do "$RUNNER_TEMP/guests/$t.elf" > "$RUNNER_TEMP/native-out/$t.txt"; done
           wc -l "$RUNNER_TEMP"/native-out/*.txt
-      - name: Madeira x64 test programs (for --scan-pe)
+      - name: DanPort x64 test programs (for --scan-pe)
         run: |
           . engine/wine/PIN
           mkdir -p "$RUNNER_TEMP/pe"
           for exe in hello-x64 fib-x64 clocktest-x64 heap-x64 fileio-x64 calltest-x64 fpconf-x64 child-test-x64 cube-x64 d3d12-cube-x64; do
-            curl -fsSL -o "$RUNNER_TEMP/pe/$exe.exe" \
-              "https://raw.githubusercontent.com/willfaust/Madeira/$MADEIRA_SHA/app/Madeira/arm64ec-windows/$exe.exe" || echo "no $exe"
+            python3 tools/port_source.py file "$RUNNER_TEMP/pe/$exe.exe" --ref "$DANPORT_SHA" --source-path "app/{port}/arm64ec-windows/$exe.exe" || echo "no $exe"
           done
           ls -la "$RUNNER_TEMP/pe"
       - uses: actions/upload-artifact@v5

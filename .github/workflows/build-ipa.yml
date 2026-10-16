@@ -3,6 +3,9 @@ name: Build IPA
 on:
   workflow_dispatch:
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
 permissions:
   contents: write
   actions: read
@@ -111,23 +114,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Step 5: the D3D/Metal DLLs rebuilt with 16 KB sections (dxmt-pe.yml) replace Madeira's
+          # Step 5: the D3D/Metal DLLs rebuilt with 16 KB sections (dxmt-pe.yml) replace DanPort's
           # 4 KB-aligned prebuilt ones, which cannot become signed dylibs.
           D3D_RUN=$(bash tools/latest-run.sh dxmt-pe.yml || true)
           if [ -n "$D3D_RUN" ] && gh run download "$D3D_RUN" -R "$GITHUB_REPOSITORY" -n d3d-pe-dlls -D "$RUNNER_TEMP/d3d-pe"; then
-            cp "$RUNNER_TEMP"/d3d-pe/*.dll engine/wine/madeira/app/Madeira/arm64ec-windows/
+            cp "$RUNNER_TEMP"/d3d-pe/*.dll engine/wine/danport/app/DanPort/arm64ec-windows/
             echo "- D3D DLLs: 16 KB-aligned rebuild from run $D3D_RUN ($(ls "$RUNNER_TEMP"/d3d-pe | tr '\n' ' '))" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           mkdir -p build
-          python3 engine/pedylib/pe2dylib.py audit engine/wine/madeira/app/Madeira/arm64ec-windows/*.dll \
+          python3 engine/pedylib/pe2dylib.py audit engine/wine/danport/app/DanPort/arm64ec-windows/*.dll \
             --md "$GITHUB_STEP_SUMMARY" --json build/pe-audit.json | head -30
           # The first real Wine DLL for the no-JIT test: ntdll (no imports), x18 rewritten.
           mkdir -p App/Generated/pedylib
-          python3 engine/pedylib/pe2dylib.py convert engine/wine/madeira/app/Madeira/arm64ec-windows/ntdll.dll \
+          python3 engine/pedylib/pe2dylib.py convert engine/wine/danport/app/DanPort/arm64ec-windows/ntdll.dll \
             App/Generated/pedylib | tail -4
           # No-JIT step B: every Wine PE file that fits the scheme becomes a signed dylib (PE/wine),
           # named by file name as Wine looks it up. xtajit64 (FEX) is replaced by the stub emulator.
-          FARM=engine/wine/madeira/app/Madeira/arm64ec-windows
+          FARM=engine/wine/danport/app/DanPort/arm64ec-windows
           mkdir -p App/Generated/pedylib/wine
           ok=0; skip=0
           for f in "$FARM"/*; do
@@ -139,18 +142,18 @@ jobs:
               skip=$((skip + 1)); echo "not converted: $(basename "$f")"
             fi
           done
-          # Wine runs bare-name programs from system32, which Madeira links to the farm.
+          # Wine runs bare-name programs from system32, which DanPort links to the farm.
           [ -f App/Generated/pedylib/winepe/hello-arm64ec.exe ] && cp App/Generated/pedylib/winepe/hello-arm64ec.exe "$FARM/"
           [ -f App/Generated/pedylib/winepe/suite-x64.exe ] && cp App/Generated/pedylib/winepe/suite-x64.exe "$FARM/"
-          # Madeira Dock: Valve's own Steam client starts games that need Steam (SteamDock.swift).
+          # DanPort Dock: Valve's own Steam client starts games that need Steam (SteamDock.swift).
           if [ -f App/Generated/pedylib/winepe/dockhost.exe ]; then
             cp App/Generated/pedylib/winepe/dockhost.exe App/Generated/pedylib/winepe/dock-notices.txt "$FARM/"
-            echo "- Madeira Dock: dockhost.exe $(sha256sum "$FARM/dockhost.exe" | cut -c1-16)" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "- DanPort Dock: dockhost.exe $(sha256sum "$FARM/dockhost.exe" | cut -c1-16)" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           echo "- No-JIT Wine: $ok PE files as signed dylibs, $skip not converted" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # 32-bit games (WoW64, docs/INTERPRETERS.md stage 1): a 32-bit process's 64-bit half runs on
-      # Madeira's aarch64 farm, which becomes signed dylibs like the ARM64EC farm (PE/wine-a64;
+      # DanPort's aarch64 farm, which becomes signed dylibs like the ARM64EC farm (PE/wine-a64;
       # Wine maps aarch64 images from there, nojit_dylib.py). The i386 farm (wine-i386.yml) is
       # data, bundled as it is. FEX's xtajit.dll (the WoW64 CPU with JIT) is not converted.
       - name: WoW64 farms (aarch64 as signed dylibs, i386)
@@ -159,11 +162,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          A64=engine/wine/madeira/app/Madeira/aarch64-windows
+          A64=engine/wine/danport/app/DanPort/aarch64-windows
           mkdir -p App/Generated/pedylib/wine-a64
           I386_RUN=$(bash tools/latest-run.sh wine-i386.yml || true)
           # Our rebuilds of aarch64 modules (wine-i386.yml: wow64win.dll with atoms kept) replace
-          # Madeira's copies before they become dylibs.
+          # DanPort's copies before they become dylibs.
           if [ -n "$I386_RUN" ] && gh run download "$I386_RUN" -R "$GITHUB_REPOSITORY" -n wine-a64-overrides -D a64-overrides; then
             for f in a64-overrides/*; do
               [ -f "$f" ] && cp -f "$f" "$A64/" && echo "- WoW64 host side: $(basename "$f") from run $I386_RUN (patched rebuild)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -181,7 +184,7 @@ jobs:
           done
           [ -f App/Generated/pedylib/winepe-a64/hello-aarch64.exe ] && cp App/Generated/pedylib/winepe-a64/hello-aarch64.exe "$A64/"
           echo "- WoW64 host side: $ok aarch64 PE files as signed dylibs, $skip not converted ($(du -sh "$A64" | cut -f1) farm)" | tee -a "$GITHUB_STEP_SUMMARY"
-          I386=engine/wine/madeira/app/Madeira/i386-windows
+          I386=engine/wine/danport/app/DanPort/i386-windows
           mkdir -p "$I386"
           if [ -n "$I386_RUN" ] && gh run download "$I386_RUN" -R "$GITHUB_REPOSITORY" -n wine-i386-farm -D "$I386"; then
             # The 32-bit test programs (engine/pedylib/build-spike.sh): C:\windows\syswow64\*.exe
@@ -196,7 +199,7 @@ jobs:
         run: |
           echo "::notice::No Wine in this IPA yet (stage 2 builds in the 'Stage 2 - Wine unix side' workflow)."
           git checkout -- Config/Wine.xcconfig project.yml
-          rm -rf engine/wine/madeira App/Generated/wine_version.h
+          rm -rf engine/wine/danport App/Generated/wine_version.h
 
       - name: Stage DXMT (stage 3) from the latest DXMT build
         id: dxmt

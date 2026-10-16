@@ -1,10 +1,13 @@
 name: PE to signed dylib conversion (farms)
 
-# engine/pedylib/pe2dylib.py over Madeira's real DLL farms at the pin (engine/wine/PIN), in a
+# engine/pedylib/pe2dylib.py over DanPort's real DLL farms at the pin (engine/wine/PIN), in a
 # few minutes instead of an IPA build: how many files convert with --strict, why the others do
 # not, and a disassembly of a rewritten aarch64 syscall thunk (docs/INTERPRETERS.md, stage 1).
 on:
   workflow_dispatch:
+
+env:
+  GH_TOKEN: ${{ github.token }}
 
 permissions:
   contents: read
@@ -16,24 +19,21 @@ jobs:
       - uses: actions/checkout@v5
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils-aarch64-linux-gnu > /dev/null
-      - name: Madeira's DLL farms at the pin
+      - name: DanPort's DLL farms at the pin
         run: |
           . engine/wine/PIN
-          git init -q "$RUNNER_TEMP/md"
+          python3 tools/port_source.py checkout "$RUNNER_TEMP/md" --ref "$DANPORT_SHA"
           cd "$RUNNER_TEMP/md"
-          git remote add origin "$MADEIRA_REPO"
-          git sparse-checkout set --no-cone app/Madeira/aarch64-windows app/Madeira/arm64ec-windows
-          git fetch -q --depth 1 origin "$MADEIRA_SHA" && git checkout -q FETCH_HEAD
-          ls app/Madeira/aarch64-windows | wc -l; ls app/Madeira/arm64ec-windows | wc -l
+          ls app/DanPort/aarch64-windows | wc -l; ls app/DanPort/arm64ec-windows | wc -l
       - name: Convert every file (--strict)
         run: |
           set -o pipefail
           {
-            echo "## pe2dylib over Madeira's farms"
+            echo "## pe2dylib over DanPort's farms"
             for farm in aarch64-windows arm64ec-windows; do
               ok=0; bad=0; fails=""
               mkdir -p "$RUNNER_TEMP/out/$farm"
-              for f in "$RUNNER_TEMP/md/app/Madeira/$farm"/*; do
+              for f in "$RUNNER_TEMP/md/app/DanPort/$farm"/*; do
                 n=$(basename "$f")
                 case "$n" in xtajit.dll|xtajit64.dll) continue ;; esac
                 if out=$(python3 engine/pedylib/pe2dylib.py convert --strict --keep-ext "$f" "$RUNNER_TEMP/out/$farm" 2>&1); then

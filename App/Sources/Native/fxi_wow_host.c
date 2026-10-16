@@ -42,7 +42,7 @@ typedef struct {
 
 typedef long long (*wow_call_fn)(void *fn, long long a0, long long a1, long long a2, void *entry_ctx);
 
-// Per thread, in TEB64->TlsSlots[14] (free in both Windows' and Wine's WoW64 layout: Madeira's FEX
+// Per thread, in TEB64->TlsSlots[14] (free in both Windows' and Wine's WoW64 layout: DanPort's FEX
 // module found 16 is ntdll's errno cell).
 typedef struct {
     Fx32Cpu *cpu;
@@ -627,7 +627,7 @@ static int tracing(void) {
 }
 
 // The pad as a 32-bit program reads it: NtUserCallTwoParam(index | op << 8, buffer,
-// NtUserCallTwoParam_GetGamepadState = 10), Madeira's host snapshot read behind XInput (and its
+// NtUserCallTwoParam_GetGamepadState = 10), DanPort's host snapshot read behind XInput (and its
 // DirectInput joystick). The first query and every change of what came back for slot 0 (result,
 // buttons, left stick) are logged, 40 lines per run: a pad the game ignores shows its presses
 // here; one that never reaches it does not. So is the code that reads it, once per program and

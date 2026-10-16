@@ -1,6 +1,6 @@
 name: Scan Valve's Steam client with FXI
 
-# Madeira Dock runs Valve's own steamclient64.dll in FXI without JIT. This job fetches the same
+# DanPort Dock runs Valve's own steamclient64.dll in FXI without JIT. This job fetches the same
 # pinned client packages the app downloads (App/Sources/Steam/SteamRuntime.swift: Valve's update
 # CDN, exact sizes and SHA-256), unpacks them on the runner only, and runs `fxi --scan-pe` over
 # every 64-bit PE inside, listing the instructions FXI does not implement yet. Nothing is
@@ -57,7 +57,7 @@ jobs:
         run: |
           # FXI's CPUID reports SSE2 only, so code behind AVX/AVX2 (VEX c4/c5), SSSE3/SSE4.x and
           # AES-NI/SHA-NI (0f 38, 0f 3a), ADX (0f 38 f6) and BMI is not taken. The rest is what
-          # Madeira Dock can actually reach in Valve's client, tier0 and vstdlib.
+          # DanPort Dock can actually reach in Valve's client, tier0 and vstdlib.
           cd "$RUNNER_TEMP/steam/unpacked"
           for f in steamclient64.dll tier0_s64.dll vstdlib_s64.dll; do
             echo "== $f"

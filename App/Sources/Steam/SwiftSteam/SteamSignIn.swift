@@ -15,7 +15,7 @@ enum SteamSignIn {
     /// Posted on the main queue after a sign-in is stored or removed.
     static let didChange = Notification.Name("PocketGamesSteamSignInDidChange")
 
-    /// `env.NAME` from madeira.cfg, then the process environment. "0" is off.
+    /// `env.NAME` from danport.cfg, then the process environment. "0" is off.
     static func flag(_ name: String, default fallback: Bool) -> Bool {
         guard let value = SteamConfig.get("env." + name) ?? ProcessInfo.processInfo.environment[name] else {
             return fallback
@@ -23,8 +23,8 @@ enum SteamSignIn {
         return value.trimmingCharacters(in: .whitespaces) != "0"
     }
 
-    /// `env.MADEIRA_STEAM_SIGNIN = 0` hides the sign-in button.
-    static var isEnabled: Bool { flag("MADEIRA_STEAM_SIGNIN", default: true) }
+    /// `env.DANPORT_STEAM_SIGNIN = 0` hides the sign-in button.
+    static var isEnabled: Bool { flag("DANPORT_STEAM_SIGNIN", default: true) }
 
     static var isSignedIn: Bool { credentialsForDock() != nil }
 
@@ -207,7 +207,7 @@ final class SteamSignInModel: ObservableObject {
         signInTask = nil; qr.onNewChallenge = nil
         qrImage = nil; qrLink = nil; guardPrompt = nil; signInBusy = false
         guard SteamSignIn.store(accountName: account, refreshToken: refresh, accessToken: access) else {
-            signInError = "Steam accepted the sign-in, but Madeira could not save it in this device's Keychain. Check the app's signing and try again."
+            signInError = "Steam accepted the sign-in, but PocketGames No J could not save it in this device's Keychain. Check the app's signing and try again."
             SteamLog.event("[steam-signin] sign-in keychain-store failed method=\(method)")
             return
         }

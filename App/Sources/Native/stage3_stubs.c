@@ -27,7 +27,7 @@ const void *dxmt_winemetal_unix_call_wow64_funcs[STUB_ENTRIES] = { FILL };
 const void *const dxmt_d3d9_unix_call_wow64_funcs[STUB_ENTRIES] = { FILL };
 
 /* Diagnostics hook DXMT provides (weak-imported by ntdll's exception thread). */
-const char *madeira_wmt_released_class(uintptr_t addr, uint64_t *ago) {
+const char *danport_wmt_released_class(uintptr_t addr, uint64_t *ago) {
     (void)addr;
     (void)ago;
     return 0;

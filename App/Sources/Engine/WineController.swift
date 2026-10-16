@@ -240,16 +240,16 @@ final class WineController: ObservableObject, @unchecked Sendable {
                 return
             }
         }
-        setenv("MADEIRA_STEAM_APPID", String(appID), 1)
-        setenv("MADEIRA_STEAM_APPPATH", plan.appPath, 1)
-        setenv("MADEIRA_WORKDIR", plan.workingFolder, 1)
+        setenv("DANPORT_STEAM_APPID", String(appID), 1)
+        setenv("DANPORT_STEAM_APPPATH", plan.appPath, 1)
+        setenv("DANPORT_WORKDIR", plan.workingFolder, 1)
         nextLaunch = .steam
         run(Program(id: plan.exe, title: title, detail: "", graphics: true, interpreted: interpreted, aarch64: is32), args: plan.arguments)
     }
 
     /// A game the user added (CustomGames: a DRM-free folder in Documents/Games, C:\Games in
     /// Wine), started in its program's folder. Not a Steam game: like a Dock session, the bridge
-    /// publishes no Steam identity for it (MADEIRA_DOCK_SESSION), so no game sees the upstream port’s
+    /// publishes no Steam identity for it (DANPORT_DOCK_SESSION), so no game sees the upstream port’s
     /// fixed fallback App ID.
     func runCustomGame(_ game: CustomGame) {
         let interpreted = true
@@ -261,8 +261,8 @@ final class WineController: ObservableObject, @unchecked Sendable {
             state = .failed(Self.wow64Refusal)
             return
         }
-        for k in ["MADEIRA_STEAM_APPID", "MADEIRA_STEAM_APPPATH"] { unsetenv(k) }
-        setenv("MADEIRA_WORKDIR", game.windowsWorkdir, 1)
+        for k in ["DANPORT_STEAM_APPID", "DANPORT_STEAM_APPPATH"] { unsetenv(k) }
+        setenv("DANPORT_WORKDIR", game.windowsWorkdir, 1)
         nextLaunch = .custom
         run(Program(id: game.windowsExe, title: game.name, detail: "", graphics: true, interpreted: interpreted, aarch64: is32), args: game.arguments)
     }
@@ -278,19 +278,19 @@ final class WineController: ObservableObject, @unchecked Sendable {
     /// x64 code in FXI; the game is the host's child process.
     func runDockGame(_ game: DockGame, launchOption: UInt32, title: String) {
         let interpreted = true
-        for k in ["MADEIRA_STEAM_APPID", "MADEIRA_STEAM_APPPATH", "MADEIRA_WORKDIR"] { unsetenv(k) }   // no direct start
+        for k in ["DANPORT_STEAM_APPID", "DANPORT_STEAM_APPPATH", "DANPORT_WORKDIR"] { unsetenv(k) }   // no direct start
         SteamDock.configure(game, launchOption: launchOption)
         // Interpreter Valve's client runs interpreted: in build 105 it was still in its HTTPS
         // setup (OpenSSL in CHTTPClientThreadPool) when the host's 90 s sign-in wait ran out.
-        // Our dockhost (engine/pedylib/madeira-dock-signin-wait.patch) reads a longer wait here.
-        if interpreted { setenv("MADEIRA_DOCK_SIGNIN_MS", "480000", 1) } else { unsetenv("MADEIRA_DOCK_SIGNIN_MS") }
+        // Our dockhost (engine/pedylib/danport-dock-signin-wait.patch) reads a longer wait here.
+        if interpreted { setenv("DANPORT_DOCK_SIGNIN_MS", "480000", 1) } else { unsetenv("DANPORT_DOCK_SIGNIN_MS") }
         // Interpreter Valve's client never finished a TLS handshake in time (build 178: its CM
         // pings over WebSocket have 1 s each and failed at once, the HTTPS CM directory timed out
         // after 27 s and its second try never returned, with the client's HTTP thread in OpenSSL's
         // bignum code throughout). Its other transport to Steam, UDP/TCP with Valve's own channel
         // encryption, needs no TLS: the host has the client prefer it
-        // (engine/pedylib/madeira-dock-cm-transport.patch). With JIT the client decides as usual.
-        if interpreted { setenv("MADEIRA_DOCK_CM_TRANSPORT", "netfilter", 1) } else { unsetenv("MADEIRA_DOCK_CM_TRANSPORT") }
+        // (engine/pedylib/danport-dock-cm-transport.patch). With JIT the client decides as usual.
+        if interpreted { setenv("DANPORT_DOCK_CM_TRANSPORT", "netfilter", 1) } else { unsetenv("DANPORT_DOCK_CM_TRANSPORT") }
         // Build 181: the client still asks its HTTPS CM directory first and waited on it for over
         // 4 minutes. Its address then resolves to nothing at once (engine/wine/patches/dns_refuse.py),
         // so the request fails and the client takes the UDP/TCP servers PocketGamesNoJ wrote into its
@@ -301,7 +301,7 @@ final class WineController: ObservableObject, @unchecked Sendable {
         run(Program(id: SteamDock.executable, title: title, detail: "", graphics: true, interpreted: interpreted))
     }
 
-    /// Set while a Dock game runs: watch() polls the host's report (C:\madeira-dock.txt).
+    /// Set while a Dock game runs: watch() polls the host's report (C:\danport-dock.txt).
     private(set) var dockActive = false
     /// The host's failure, in words, when its report ended with a nonzero result.
     @Published private(set) var dockFailure: String?
@@ -326,7 +326,7 @@ final class WineController: ObservableObject, @unchecked Sendable {
         pendingOverrides = nil
         // Per-launch variables (runSteamGame) must not outlive a launch that never boots.
         func refuse(_ why: String) {
-            for k in ["MADEIRA_STEAM_APPID", "MADEIRA_STEAM_APPPATH", "MADEIRA_WORKDIR"] { unsetenv(k) }
+            for k in ["DANPORT_STEAM_APPID", "DANPORT_STEAM_APPPATH", "DANPORT_WORKDIR"] { unsetenv(k) }
             state = .failed(why)
         }
         guard linked else { return refuse("This build does not include Wine yet.") }
@@ -387,7 +387,7 @@ final class WineController: ObservableObject, @unchecked Sendable {
                 unsetenv("PocketGamesNoJ_NOJIT_WOW_CPU")
             }
             // An aarch64 program gets the upstream port’s plain aarch64 session (its exe name picks it).
-            if program.aarch64 { unsetenv("MADEIRA_USE_ARM64EC") } else { setenv("MADEIRA_USE_ARM64EC", "1", 1) }
+            if program.aarch64 { unsetenv("DANPORT_USE_ARM64EC") } else { setenv("DANPORT_USE_ARM64EC", "1", 1) }
             setenv("PocketGamesNoJ_NOJIT_TRACE", CrashReporter.interpreterTraceURL.path, 1)
             dlog("[wine] interpreter session: DLLs from \(Self.peWineDir)\(program.aarch64 ? " (aarch64: \(Self.peWineA64Dir))" : "")")
             // Settings › Interpreter › game audio off: no audio endpoints, so the game's audio
@@ -413,16 +413,16 @@ final class WineController: ObservableObject, @unchecked Sendable {
         }
         // A 32-bit game's launcher starts the game and exits (Steins;Gate: Launcher.exe ->
         // Game.exe): the session waits for the children it started instead of ending with the
-        // launcher and killing the game (the upstream port’s MADEIRA_WAIT_CHILDREN; opt-in there because a
+        // launcher and killing the game (the upstream port’s DANPORT_WAIT_CHILDREN; opt-in there because a
         // child that ends from a worker thread can keep the session waiting, which the game menu's
         // Quit ends). 64-bit sessions keep the upstream port’s default.
-        if program.aarch64 { setenv("MADEIRA_WAIT_CHILDREN", "1", 1) } else { unsetenv("MADEIRA_WAIT_CHILDREN") }
+        if program.aarch64 { setenv("DANPORT_WAIT_CHILDREN", "1", 1) } else { unsetenv("DANPORT_WAIT_CHILDREN") }
         // A Dock session publishes no fixed Steam game identity: the upstream port’s bridge otherwise sets
         // SteamAppId/SteamGameId/SteamAppPath (its Thumper fallback) for every launch, and in
         // build 105 that reached Valve's client inside the host, which then never finished
         // signing in (result 34). Valve's client gives the game it starts its own identity.
         // An added (non-Steam) game gets none either.
-        if dockActive || customActive { setenv("MADEIRA_DOCK_SESSION", "1", 1) } else { unsetenv("MADEIRA_DOCK_SESSION") }
+        if dockActive || customActive { setenv("DANPORT_DOCK_SESSION", "1", 1) } else { unsetenv("DANPORT_DOCK_SESSION") }
         state = .booting(program.title)
         // Controller API for this session (Settings › Controller, `api` above). Must be in the
         // environment before the wineserver starts: the HID device and the
@@ -442,9 +442,9 @@ final class WineController: ObservableObject, @unchecked Sendable {
         // Game settings › Show performance overlay: Metal's HUD on the game's layer.
         let hud = overrides?.performanceHUD ?? false
         Task { @MainActor in GameHostView.shared.setPerformanceHUD(hud) }
-        unsetenv("MADEIRA_DINPUT_PAD"); unsetenv("MADEIRA_HIDPAD"); unsetenv("MADEIRA_HIDPAD_NAME")
-        unsetenv("MADEIRA_DINPUT_TRACE")
-        if wantHIDPad { setenv("MADEIRA_HIDPAD", "dualsense", 1) }   // read when the wineserver starts
+        unsetenv("DANPORT_DINPUT_PAD"); unsetenv("DANPORT_HIDPAD"); unsetenv("DANPORT_HIDPAD_NAME")
+        unsetenv("DANPORT_DINPUT_TRACE")
+        if wantHIDPad { setenv("DANPORT_HIDPAD", "dualsense", 1) }   // read when the wineserver starts
         if programsThisRun == 0 { sessionHIDPad = wantHIDPad ? "dualsense" : "" }
         else if style == .playstation, sessionHIDPad.isEmpty {
             dlog("[pad] \(program.title) is set to PlayStation, but this Wine session started without the DualSense: XInput (Xbox) until PocketGames No J restarts")
@@ -459,7 +459,7 @@ final class WineController: ObservableObject, @unchecked Sendable {
             dinput = PadAPIScan.needsDInputPad(PadPrefs.scanAPIs(exe: exe))
         }
         // Its trace (the upstream port’s joystick_ios.c, rate-limited) shows in the log whether the game reads it.
-        if dinput { setenv("MADEIRA_DINPUT_PAD", "1", 1); setenv("MADEIRA_DINPUT_TRACE", "1", 1) }
+        if dinput { setenv("DANPORT_DINPUT_PAD", "1", 1); setenv("DANPORT_DINPUT_TRACE", "1", 1) }
         padStyle = style
         padKeyboard = keyboardPad
         ControllerBridge.shared.setMode(Self.bridgeMode(style: style, keyboard: keyboardPad))
@@ -478,8 +478,8 @@ final class WineController: ObservableObject, @unchecked Sendable {
                 dlog("[display] \(program.title) asks for a \(h)-line monitor; Wine keeps the session's first (\(first) lines) until PocketGames No J restarts")
             }
             if programsThisRun == 0 { Self.firstMonitorHeight = h }
-            setenv("MADEIRA_SCREEN_W", String(w), 1)
-            setenv("MADEIRA_SCREEN_H", String(h), 1)
+            setenv("DANPORT_SCREEN_W", String(w), 1)
+            setenv("DANPORT_SCREEN_H", String(h), 1)
             dlog("[display] virtual monitor \(w)x\(h) for \(program.title)")
         }
         let prefix = prefixURL.path

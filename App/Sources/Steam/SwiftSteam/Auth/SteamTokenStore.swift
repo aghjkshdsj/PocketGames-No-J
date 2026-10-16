@@ -9,7 +9,7 @@ import Security
 
 /// Securely stores Steam authentication tokens in the Keychain
 class SteamTokenStore {
-    private let serviceName = "madeira.steam.tokens"
+    private let serviceName = "danport.steam.tokens"
 
     struct StoredTokens: Codable {
         var accountName: String

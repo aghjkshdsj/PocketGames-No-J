@@ -1,37 +1,33 @@
 #!/bin/bash
 # Stage 3: build DXMT's iOS side (Direct3D -> Metal) as one static library.
 #   engine/dxmt/build-unix.sh <step>
-#   fetch   Madeira + its DXMT fork (+ DXMT submodules) + LLVM 15 sources
+#   fetch   DanPort + its DXMT fork (+ DXMT submodules) + LLVM 15 sources
 #   llvm    LLVM 15 libraries for iOS arm64 (host llvm-tblgen first)
 #   metal   Metal toolchain component (Xcode 26 ships it separately)
-#   dxmt    Madeira build/dxmt-ios/build.sh -> combined with LLVM -> libdxmt_combined.a
+#   dxmt    DanPort build/dxmt-ios/build.sh -> combined with LLVM -> libdxmt_combined.a
 #   tests   d3d12-cube-x64.exe with colour writes enabled (llvm-mingw)
 #   collect engine/dxmt/out
 # The Windows-side DXMT DLLs (d3d11, dxgi, winemetal, d3d12) are prebuilt in
-# Madeira's ARM64EC DLL farm and match this commit.
+# DanPort's ARM64EC DLL farm and match this commit.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HERE="$ROOT/engine/dxmt"
 # shellcheck disable=SC1091
 source "$HERE/PIN"
-M="$HERE/madeira"
+M="$HERE/danport"
 T="$M/toolchains"
 OUT="$HERE/out"
 JOBS="$(sysctl -n hw.ncpu)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 
 step_fetch() {
-    if [ ! -d "$M/.git" ] || [ "$(git -C "$M" rev-parse HEAD)" != "$MADEIRA_SHA" ]; then
-        rm -rf "$M"
-        git init -q "$M"
-        git -C "$M" remote add origin "$MADEIRA_REPO"
-        git -C "$M" fetch -q --depth 1 origin "$MADEIRA_SHA"
-        git -C "$M" checkout -q FETCH_HEAD
-    fi
+    python3 "$ROOT/tools/port_source.py" checkout "$M" --repository-id "$DANPORT_REPOSITORY_ID" --ref "$DANPORT_SHA"
     if [ "$(git -C "$M/dxmt" rev-parse HEAD 2>/dev/null)" != "$DXMT_SHA" ]; then
         git -C "$M" submodule update --init --depth 1 dxmt
+        python3 "$ROOT/tools/port_source.py" normalize "$M"
     fi
     git -C "$M/dxmt" submodule update --init --depth 1 --recursive
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     if [ ! -d "$T/llvm-project/llvm" ]; then
         mkdir -p "$T"
         curl -fsSL "$LLVM_URL" | tar -xJ -C "$T"
@@ -71,7 +67,7 @@ step_llvm() {
 
 # airconv_context.cpp embeds three AIR modules (air_msad.h, air_samplepos.h,
 # air_tessellation.h). DXMT's meson makes them with metalir_generator +
-# hexdump_generator (src/airconv/meson.build); Madeira's build.sh doesn't, so
+# hexdump_generator (src/airconv/meson.build); DanPort's build.sh doesn't, so
 # do the same here: .metal -> .air -> xxd C array named after the file.
 airconv_shader_headers() {
     local H="$1" S="$M/dxmt/src/airconv/shaders" n
@@ -94,10 +90,11 @@ step_dxmt() {
     # An ended 32-bit game's Metal textures and buffers go with its window (patches/metal_owner.py,
     # docs/SESSION_REUSE.md). Start from the pristine file: the checkout is cached.
     git -C "$M/dxmt" checkout -- src/winemetal/unix/winemetal_unix.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     python3 "$HERE/patches/metal_owner.py" "$M/dxmt"
     airconv_shader_headers "$D/shader-headers"
     bash "$D/build.sh" || {
-        # Madeira's script keeps each failed object's compiler output in obj/<name>.err only
+        # DanPort's script keeps each failed object's compiler output in obj/<name>.err only
         for e in "$D"/obj/*.err; do [ -s "$e" ] && grep -q "error:" "$e" && { echo "== $e"; grep -B2 -A3 "error:" "$e" | head -60; }; done
         return 1
     }
@@ -106,13 +103,13 @@ step_dxmt() {
     ls -la "$D/libdxmt_combined.a"
 }
 
-# Madeira's d3d12-cube-x64.exe zeroes its pipeline desc and never sets
+# DanPort's d3d12-cube-x64.exe zeroes its pipeline desc and never sets
 # RenderTargetWriteMask, so on D3D12 (and on Windows) it draws nothing but the
 # clear colour. Rebuild it with colour writes enabled; stage-app.sh ships it.
 step_tests() {
     # shellcheck disable=SC1091
     source "$ROOT/engine/wine/PIN"
-    local TC="$T/$LLVM_MINGW/bin" W="$M/madeira-d3d12/tests/windows" B="$M/build/d3d12-tests"
+    local TC="$T/$LLVM_MINGW/bin" W="$M/danport-d3d12/tests/windows" B="$M/build/d3d12-tests"
     if [ ! -x "$TC/x86_64-w64-mingw32-clang" ]; then
         curl -fsSL -o "$T/llvm-mingw.tar.xz" "$LLVM_MINGW_URL"
         echo "$LLVM_MINGW_SHA256  $T/llvm-mingw.tar.xz" | shasum -a 256 -c -
@@ -132,7 +129,7 @@ step_collect() {
     mkdir -p "$OUT"
     cp "$M/build/dxmt-ios/libdxmt_combined.a" "$OUT/"
     cp "$M/build/d3d12-tests/d3d12-cube-x64.exe" "$OUT/"
-    git -C "$M" rev-parse HEAD > "$OUT/MADEIRA_SHA"
+    git -C "$M" rev-parse HEAD > "$OUT/DANPORT_SHA"
     ls -la "$OUT"
 }
 

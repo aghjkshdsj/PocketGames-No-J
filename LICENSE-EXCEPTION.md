@@ -1,11 +1,11 @@
 # Additional permission (GPL-3.0 section 7)
 
-PocketGamesNoJ is licensed under GPL-3.0-or-later (`LICENSE`). Parts of it are derived from Madeira
-(see `THIRD-PARTY-NOTICES.md`), whose authors attach the Madeira Converter Exception below; their
-full statement is in `LICENSES/Madeira-LICENSE-EXCEPTION.md`. PocketGamesNoJ's own code is offered
+PocketGamesNoJ is licensed under GPL-3.0-or-later (`LICENSE`). Parts of it are derived from DanPort
+(see `THIRD-PARTY-NOTICES.md`), whose authors attach the DanPort Converter Exception below; their
+full statement is in `LICENSES/DanPort-LICENSE-EXCEPTION.md`. PocketGamesNoJ's own code is offered
 with the same additional permission, so the combined program can be conveyed under one set of terms.
 
-### Madeira Converter Exception, version 1 (of 2026-09-16; in effect from the adoption date above)
+### DanPort Converter Exception, version 1 (of 2026-09-16; in effect from the adoption date above)
 
 Additional permission under GNU GPL version 3 section 7.
 

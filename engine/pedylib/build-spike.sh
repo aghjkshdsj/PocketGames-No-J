@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${1:?out dir}"
 CACHE="${2:-$HERE/toolchain}"
-# Same llvm-mingw release as Madeira's Wine build (engine/wine/PIN), Linux x86-64 host.
+# Same llvm-mingw release as DanPort's Wine build (engine/wine/PIN), Linux x86-64 host.
 LLVM_MINGW=llvm-mingw-20260421-ucrt-ubuntu-22.04-x86_64
 LLVM_MINGW_URL=https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/$LLVM_MINGW.tar.xz
 LLVM_MINGW_SHA256=f8b8cce779affeab47bcaec6ce6e9e768b166094a366123ef64b2d0b389cc121
@@ -116,31 +116,31 @@ build_wow64_extras() {
 }
 ( set -e; build_wow64_extras ) || echo "::warning::WoW64 (32-bit) extras failed: no 32-bit test programs or CPU module"
 
-# Madeira Dock (github.com/willfaust/madeira-dock, GPL-3.0-or-later with the Madeira Converter
+# DanPort Dock (source repository ID 1393407380, GPL-3.0-or-later with the DanPort Converter
 # Exception, Copyright 2026 125hz): dockhost.exe, the headless host that loads Valve's own Steam
 # client so games that need Steam running start (App/Sources/Steam/SteamDock.swift). Built as
-# Madeira's build/madeira-dock/build.sh does (static runtime, stripped), from the commit Madeira
+# DanPort's build/danport-dock/build.sh does (static runtime, stripped), from the commit DanPort
 # 65e6fe8f pins; its notices go next to it. Without it the app keeps starting games directly.
 DOCK_SHA=e00078410845eb41d2618edd5e3ff0879a4c0735
 build_dock() {
-    local src="$B/madeira-dock"
+    local src="$B/danport-dock"
     rm -rf "$src"; mkdir -p "$src" "$OUT/winepe"
-    curl -fsSL "https://codeload.github.com/willfaust/madeira-dock/tar.gz/$DOCK_SHA" | tar -xz -C "$src" --strip-components=1
-    # PocketGamesNoJ change: MADEIRA_DOCK_SIGNIN_MS lengthens the 90 s sign-in and game-start waits
+    python3 "$ROOT/tools/port_source.py" checkout "$src" --repository-id 1393407380 --ref "$DOCK_SHA"
+    # PocketGamesNoJ change: DANPORT_DOCK_SIGNIN_MS lengthens the 90 s sign-in and game-start waits
     # for a client running without JIT (the app sets it only then).
-    patch -p1 -d "$src" < "$HERE/madeira-dock-signin-wait.patch"
-    # PocketGamesNoJ change: MADEIRA_DOCK_CM_TRANSPORT=netfilter has Valve's client prefer its UDP/TCP
+    patch -p1 -d "$src" < "$HERE/danport-dock-signin-wait.patch"
+    # PocketGamesNoJ change: DANPORT_DOCK_CM_TRANSPORT=netfilter has Valve's client prefer its UDP/TCP
     # CM transport (Valve's own channel encryption) over TLS WebSockets, which do not complete
     # without JIT (the app sets it only then).
-    patch -p1 -d "$src" < "$HERE/madeira-dock-cm-transport.patch"
+    patch -p1 -d "$src" < "$HERE/danport-dock-cm-transport.patch"
     x86_64-w64-mingw32-clang -std=c11 -O2 -Wall -Wextra -Wno-cast-function-type \
         -static -Wl,--strip-all -Wl,--no-insert-timestamp \
         -o "$OUT/winepe/dockhost.exe" "$src"/src/*.c -ladvapi32
     {
         cat "$src/LICENSE"
-        printf '\nCorresponding source: https://github.com/willfaust/madeira-dock (commit %s)\n' "$DOCK_SHA"
-        printf 'Modified by PocketGamesNoJ: engine/pedylib/madeira-dock-signin-wait.patch and madeira-dock-cm-transport.patch in https://github.com/aghjkshdsj/PocketGames-No-J\n'
-        printf '\n\n==== LICENSE-EXCEPTION.md (Madeira Converter Exception) ====\n\n'; cat "$src/LICENSE-EXCEPTION.md"
+        printf '\nCorresponding source: https://api.github.com/repositories/1393407380 (commit %s)\n' "$DOCK_SHA"
+        printf 'Modified by PocketGamesNoJ: engine/pedylib/danport-dock-signin-wait.patch and danport-dock-cm-transport.patch in https://github.com/aghjkshdsj/PocketGames-No-J\n'
+        printf '\n\n==== LICENSE-EXCEPTION.md (DanPort Converter Exception) ====\n\n'; cat "$src/LICENSE-EXCEPTION.md"
         printf '\n\n==== COPYING (GNU General Public License, version 3) ====\n\n'; cat "$src/COPYING"
         printf '\n\n==== MinGW-w64 runtime notice (statically linked runtime) ====\n\n'; cat "$src/notices/MinGW-w64-runtime.txt"
         printf '\n\n==== LLVM runtime notice ====\n\n'; cat "$src/notices/LLVM.txt"
@@ -148,6 +148,6 @@ build_dock() {
     sha256sum "$OUT/winepe/dockhost.exe"
     llvm-readobj --file-headers "$OUT/winepe/dockhost.exe" | grep -E 'Machine' || true
 }
-( set -e; build_dock ) || echo "::warning::Madeira Dock (dockhost.exe) did not build: games start without Steam"
+( set -e; build_dock ) || echo "::warning::DanPort Dock (dockhost.exe) did not build: games start without Steam"
 ls -la "$OUT"
 exit $fail

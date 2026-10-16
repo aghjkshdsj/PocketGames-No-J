@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // FXR: superinstructions, adjacent instruction pairs run as one uop. The families were chosen
 // from the instruction-pair frequencies of a corpus of real x86-64 code (engine/fxr/corpus.sh:
-// system tools and libraries, game-adjacent libraries, Madeira's Windows test programs), never
+// system tools and libraries, game-adjacent libraries, DanPort's Windows test programs), never
 // from the benchmarks:
 //   compare-and-branch forms FXI does not fuse: a memory operand, 8/16-bit registers, (u)comis
 //   ALU with an immediate + jcc on its flags; dec/inc + je/jne/js/jns

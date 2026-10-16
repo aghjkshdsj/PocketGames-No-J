@@ -6,7 +6,7 @@
  
 +/* PocketGamesNoJ: the transport Valve's client prefers for its connection to Steam (CM). Without
 + * JIT its TLS (WebSocket CMs, the HTTPS CM directory) does not complete in time, so the app
-+ * asks (MADEIRA_DOCK_CM_TRANSPORT=netfilter) for the client's other transport, UDP/TCP with
++ * asks (DANPORT_DOCK_CM_TRANSPORT=netfilter) for the client's other transport, UDP/TCP with
 + * Valve's own channel encryption ("NetFilter"). The client rolls which one to use against the
 + * share of connections that default to WebSockets, HKCU\Software\Valve\Steam\
 + * PercentDefaultWebSockets; 0 makes the roll pick NetFilter (its built-in CM addresses when the
@@ -16,7 +16,7 @@
 +static void cm_transport(void)
 +{
 +    wchar_t value[16];
-+    DWORD n = GetEnvironmentVariableW(L"MADEIRA_DOCK_CM_TRANSPORT", value, 16);
++    DWORD n = GetEnvironmentVariableW(L"DANPORT_DOCK_CM_TRANSPORT", value, 16);
 +    if (!n || n >= 16 || wcscmp(value, L"netfilter")) {
 +        LSTATUS gone = RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"PercentDefaultWebSockets");
 +        event("cm-transport-netfilter", gone == ERROR_SUCCESS ? -1 : 0);
@@ -30,7 +30,7 @@
 +
  static bool client_directory(wchar_t *directory)
  {
-     DWORD count = GetEnvironmentVariableW(L"MADEIRA_STEAM_HOST_CLIENT_DIR", directory, PATH_CAP);
+     DWORD count = GetEnvironmentVariableW(L"DANPORT_STEAM_HOST_CLIENT_DIR", directory, PATH_CAP);
 @@ -276,6 +300,7 @@
      /* Restrict dependency search to the client directory and system32. No
       * fallback to a current-directory LoadLibrary or to a renamed client DLL.

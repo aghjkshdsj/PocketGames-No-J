@@ -2,11 +2,11 @@
 # No-JIT step 5 (docs/INTERPRETERS.md): the Direct3D/Metal DLLs rebuilt with 16 KB section
 # alignment, so engine/pedylib/pe2dylib.py can wrap them as signed dylibs.
 #
-# Madeira ships these PE DLLs prebuilt with 4 KB sections: the tail of .text and the start of
+# DanPort ships these PE DLLs prebuilt with 4 KB sections: the tail of .text and the start of
 # .rdata (where lld puts the import address table, which Wine writes at load) share a 16 KB
 # iOS page, and a signed code page cannot be written. Built here from the same sources:
-#   DXMT (Madeira's fork, engine/dxmt/PIN): winemetal.dll, d3d11.dll, d3d10core.dll, dxgi.dll
-#   madeira-d3d12 (Madeira): madeira_d3d12.dll (also shipped as d3d12.dll), d3d12core.dll
+#   DXMT (DanPort's fork, engine/dxmt/PIN): winemetal.dll, d3d11.dll, d3d10core.dll, dxgi.dll
+#   danport-d3d12 (DanPort): danport_d3d12.dll (also shipped as d3d12.dll), d3d12core.dll
 # winemetal links Wine's winecrt0 and ntdll/dbghelp import libraries and is marked builtin by
 # winebuild, so a Wine tree configured for ARM64EC provides those (only those targets are built).
 #
@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/engine/wine/PIN"
 DXMT_PIN_SHA="$(sed -n 's/^DXMT_SHA=//p' "$ROOT/engine/dxmt/PIN")"
-M="$ROOT/engine/wine/madeira"     # the Wine stage's checkout (Madeira + its Wine fork + llvm-mingw)
+M="$ROOT/engine/wine/danport"     # the Wine stage's checkout (DanPort + its Wine fork + llvm-mingw)
 W="$M/wine"
 TC="$M/toolchains/$LLVM_MINGW/bin"
 OUT="$ROOT/engine/dxmt/out-pe"
@@ -29,9 +29,11 @@ step_fetch() {
     bash "$ROOT/engine/wine/build-unix.sh" fetch
     if [ "$(git -C "$M/dxmt" rev-parse HEAD 2>/dev/null)" != "$DXMT_PIN_SHA" ]; then
         git -C "$M" submodule update --init --depth 1 dxmt
+        python3 "$ROOT/tools/port_source.py" normalize "$M"
     fi
     git -C "$M/dxmt" rev-parse HEAD
     git -C "$M/dxmt" submodule update --init --depth 1 --recursive
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
 }
 
 step_wine() {
@@ -45,7 +47,7 @@ step_wine() {
             > configure.log 2>&1 || { tail -60 configure.log; return 1; }
     fi
     make -j"$JOBS" tools/all tools/winebuild/all tools/widl/all > make-tools.log 2>&1 || { tail -40 make-tools.log; return 1; }
-    # Per-directory makes, as Madeira's build/wine-pe scripts do (winecrt0 is in libs/ in this
+    # Per-directory makes, as DanPort's build/wine-pe scripts do (winecrt0 is in libs/ in this
     # Wine; DXMT's meson looks in libs/winecrt0 and dlls/winecrt0).
     local crt=libs/winecrt0
     [ -d ../libs/winecrt0 ] || crt=dlls/winecrt0
@@ -78,14 +80,14 @@ step_dxmt() {
 }
 
 step_d3d12() {
-    # Madeira build/madeira-d3d12/build-pe.sh, with the 16 KB alignment and our paths.
-    local S="$M/madeira-d3d12/src/pe" B="$M/dxmt/$DXMT_BUILD"
+    # DanPort build/danport-d3d12/build-pe.sh, with the 16 KB alignment and our paths.
+    local S="$M/danport-d3d12/src/pe" B="$M/dxmt/$DXMT_BUILD"
     mkdir -p "$OUT"
     python3 "$S/gen_vtables.py" "$M/toolchains/$LLVM_MINGW/generic-w64-mingw32/include/d3d12.h" \
-        "$S/madeira_d3d12_stubs.h" > /dev/null
-    arm64ec-w64-mingw32-clang -shared -O2 -Wall $ALIGN -o "$OUT/madeira_d3d12.dll" "$S/madeira_d3d12.c" "$S/d3d12.def" \
-        -I"$S" -I"$M/madeira-d3d12/src" -I"$M/dxmt/src/winemetal" -L"$B/src/winemetal" -lwinemetal -luuid -lole32
-    cp "$OUT/madeira_d3d12.dll" "$OUT/d3d12.dll"   # one binary, both names (Madeira ml849)
+        "$S/danport_d3d12_stubs.h" > /dev/null
+    arm64ec-w64-mingw32-clang -shared -O2 -Wall $ALIGN -o "$OUT/danport_d3d12.dll" "$S/danport_d3d12.c" "$S/d3d12.def" \
+        -I"$S" -I"$M/danport-d3d12/src" -I"$M/dxmt/src/winemetal" -L"$B/src/winemetal" -lwinemetal -luuid -lole32
+    cp "$OUT/danport_d3d12.dll" "$OUT/d3d12.dll"   # one binary, both names (DanPort ml849)
     arm64ec-w64-mingw32-clang -shared -O2 -Wall $ALIGN -o "$OUT/d3d12core.dll" "$S/d3d12core.c" "$S/d3d12core.def"
 }
 

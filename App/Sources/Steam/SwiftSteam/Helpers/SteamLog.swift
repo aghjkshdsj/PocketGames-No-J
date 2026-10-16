@@ -11,10 +11,10 @@ import Foundation
 /// IDs or message payloads.
 ///
 /// `trace` lines are protocol-level detail, off by default. Enable with
-/// `env.MADEIRA_STEAM_TRACE = 1` in madeira.cfg. They are still written
+/// `env.DANPORT_STEAM_TRACE = 1` in danport.cfg. They are still written
 /// without credentials or payload bytes.
 enum SteamLog {
-    static let tracing = SteamSignIn.flag("MADEIRA_STEAM_TRACE", default: false)
+    static let tracing = SteamSignIn.flag("DANPORT_STEAM_TRACE", default: false)
 
     static func trace(_ message: @autoclosure () -> String) {
         guard tracing else { return }

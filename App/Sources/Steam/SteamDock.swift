@@ -29,8 +29,8 @@ struct DockGame: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Steam Dock: a small headless host (madeira-dock, built by
-/// build/madeira-dock/build.sh into arm64ec-windows/dockhost.exe) that loads
+/// Steam Dock: a small headless host (danport-dock, built by
+/// build/danport-dock/build.sh into arm64ec-windows/dockhost.exe) that loads
 /// Valve's genuine Windows Steam client inside the Wine session, signs in
 /// with the user's own refresh token and asks the client to start an
 /// installed game with Valve's own LaunchApp. Valve's client performs the
@@ -40,10 +40,10 @@ struct DockGame: Identifiable, Equatable, Sendable {
 /// with a report code.
 ///
 /// The app side is this contract: environment variables, a one-use sign-in
-/// transfer file and a numeric report file (C:\madeira-dock.txt).
+/// transfer file and a numeric report file (C:\danport-dock.txt).
 enum SteamDock {
-    /// `env.MADEIRA_DOCK = 0` hides Dock. Without a built dockhost.exe it is hidden too.
-    static var enabled: Bool { SteamSignIn.flag("MADEIRA_DOCK", default: true) && bundled }
+    /// `env.DANPORT_DOCK = 0` hides Dock. Without a built dockhost.exe it is hidden too.
+    static var enabled: Bool { SteamSignIn.flag("DANPORT_DOCK", default: true) && bundled }
     static var bundled: Bool {
         Bundle.main.url(forResource: "dockhost", withExtension: "exe", subdirectory: "arm64ec-windows") != nil
     }
@@ -120,7 +120,7 @@ enum SteamDock {
 
     /// Everything a launch needs, checked before any sign-in is handed over.
     static func validate(_ game: DockGame, drive: URL, bundled: Bool = SteamDock.bundled) throws {
-        guard bundled else { throw DockError.message("Steam Dock is not built into this app. Run build/madeira-dock/build.sh.") }
+        guard bundled else { throw DockError.message("Steam Dock is not built into this app. Run build/danport-dock/build.sh.") }
         guard validAppID(game.id), validFolderName(game.installDir) else {
             throw DockError.message("This game's Steam install record is invalid.")
         }
@@ -196,14 +196,14 @@ enum SteamDock {
                 return "Steam Dock could not initialize the Steam session (code 30). Export the log to identify the failed check."
             }
             // The host waits 90 s after sign-in for Valve's client to count the game
-            // among the account's subscriptions (madeira-dock src/session.c).
+            // among the account's subscriptions (danport-dock src/session.c).
             if result == 34 {
                 return fields["session-authenticated-online"] == "1"
                     ? "Steam signed in but did not confirm this game's license in time. Export the log before trying again."
                     : "Steam did not finish signing in. Check the connection and try again."
             }
             if result == 35 { return "Steam did not confirm a license for this game on the signed-in account." }
-            // Offline start (madeira-dock docs/OFFLINE.md): Valve's client decides.
+            // Offline start (danport-dock docs/OFFLINE.md): Valve's client decides.
             if result == 50 {
                 return fields["session-offline-abi"] == "0"
                     ? "There is no connection, and this Steam client build cannot be started offline by Steam Dock. Connect to the internet and try again."
@@ -295,7 +295,7 @@ enum SteamDock {
         "ceg-finished-jobs", "ceg-result", "ceg-disabled", "ceg-unsupported-client",
         "ceg-scm", "ceg-scm-started", "ceg-scm-error", "ceg-service-registered", "ceg-service-install", "ceg-service-stop", "ceg-scm-stopped",
         "shutdown-begin", "shutdown-complete", "probe-result"]
-    /// The host's report rounds (madeira-dock src/main.c).
+    /// The host's report rounds (danport-dock src/main.c).
     static let reportRounds: Set<String> = ["ml1820", "ml1830", "ml1860", "ml1870", "ml1970", "ml1990", "ml2000", "ml2011", "ml2015", "ml2016"]
 
     static func parseReport(_ data: Data) -> Report {
@@ -343,9 +343,9 @@ enum SteamDock {
         return "Starting Steam… \(t)"
     }
 
-    /// Reads C:\madeira-dock.txt and logs fields that changed ([dock-report]).
+    /// Reads C:\danport-dock.txt and logs fields that changed ([dock-report]).
     @MainActor static func pollReport() -> Report {
-        let url = drive.appendingPathComponent("madeira-dock.txt")
+        let url = drive.appendingPathComponent("danport-dock.txt")
         guard let file = try? FileHandle(forReadingFrom: url) else { return lastReport }
         defer { try? file.close() }
         guard let data = try? file.read(upToCount: 32769), data.count <= 32768 else { return lastReport }
@@ -413,8 +413,8 @@ enum SteamDock {
     /// Removes an unconsumed transfer (session end, sign-out, app start).
     @MainActor static func cleanup() {
         if let url = transferURL { try? FileManager.default.removeItem(at: url) }
-        unsetenv("MADEIRA_DOCK_AUTH_FILE")
-        unsetenv("MADEIRA_DOCK_OFFLINE")
+        unsetenv("DANPORT_DOCK_AUTH_FILE")
+        unsetenv("DANPORT_DOCK_OFFLINE")
     }
 
     /// Writes the one-use transfer to protected Application Support storage
@@ -425,7 +425,7 @@ enum SteamDock {
         cleanup()
         lastReport = Report()
         sessionAccount = account
-        let report = drive.appendingPathComponent("madeira-dock.txt")
+        let report = drive.appendingPathComponent("danport-dock.txt")
         if FileManager.default.fileExists(atPath: report.path) { try FileManager.default.removeItem(at: report) }
         guard let url = transferURL else { throw DockError.message("Dock's private transfer folder is unavailable.") }
         var data = try envelope(account: account, token: token, steamID: subject(token), appID: appID)
@@ -445,50 +445,50 @@ enum SteamDock {
         do {
             try fm.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
             try file.write(contentsOf: data); try file.close()
-            setenv("MADEIRA_DOCK_AUTH_FILE", handoffGuestPath(url), 1)
+            setenv("DANPORT_DOCK_AUTH_FILE", handoffGuestPath(url), 1)
             SteamLog.event("[dock-handoff] protected-file-ready=1")
         } catch { try? file.close(); cleanup(); throw error }
     }
 
     /// The host's environment for one launch.
     static func configure(_ game: DockGame, launchOption: UInt32 = 0) {
-        for key in ["MADEIRA_STEAM_HOST_PROBE", "MADEIRA_STEAM_HOST_SESSION", "MADEIRA_STEAM_HOST_LOGIN", "MADEIRA_STEAM_HOST_LAUNCH"] {
+        for key in ["DANPORT_STEAM_HOST_PROBE", "DANPORT_STEAM_HOST_SESSION", "DANPORT_STEAM_HOST_LOGIN", "DANPORT_STEAM_HOST_LAUNCH"] {
             setenv(key, "1", 1)
         }
-        setenv("MADEIRA_STEAM_HOST_APPID", String(game.id), 1)
-        setenv("MADEIRA_STEAM_HOST_LAUNCH_OPTION", String(launchOption), 1)
-        setenv("MADEIRA_STEAM_HOST_CLIENT_DIR", SteamRuntimeFiles.windowsRoot, 1)
-        setenv("MADEIRA_STEAM_HOST_EXPECTED_INSTALL", game.windowsInstallPath, 1)
-        setenv("MADEIRA_STEAM_HOST_LOG", "C:\\madeira-dock.txt", 1)
+        setenv("DANPORT_STEAM_HOST_APPID", String(game.id), 1)
+        setenv("DANPORT_STEAM_HOST_LAUNCH_OPTION", String(launchOption), 1)
+        setenv("DANPORT_STEAM_HOST_CLIENT_DIR", SteamRuntimeFiles.windowsRoot, 1)
+        setenv("DANPORT_STEAM_HOST_EXPECTED_INSTALL", game.windowsInstallPath, 1)
+        setenv("DANPORT_STEAM_HOST_LOG", "C:\\danport-dock.txt", 1)
         // The install record lists per-user executables: Dock asks Valve's client to prepare
-        // them before it launches. env.MADEIRA_DOCK_CEG = 0 never asks.
-        if game.customExecutables && SteamSignIn.flag("MADEIRA_DOCK_CEG", default: true) {
-            setenv("MADEIRA_STEAM_HOST_CEG", "1", 1)
+        // them before it launches. env.DANPORT_DOCK_CEG = 0 never asks.
+        if game.customExecutables && SteamSignIn.flag("DANPORT_DOCK_CEG", default: true) {
+            setenv("DANPORT_STEAM_HOST_CEG", "1", 1)
         } else {
-            unsetenv("MADEIRA_STEAM_HOST_CEG")
+            unsetenv("DANPORT_STEAM_HOST_CEG")
         }
         // Never let a stale environment choose the PC cached-account test path.
-        unsetenv("MADEIRA_STEAM_HOST_ACCOUNT"); unsetenv("MADEIRA_STEAM_HOST_STEAMID")
+        unsetenv("DANPORT_STEAM_HOST_ACCOUNT"); unsetenv("DANPORT_STEAM_HOST_STEAMID")
         // Valve's client unloads DLLs while it starts and the loader can map a different
         // DLL of the same size at the same address. The engine's opt-in image-retire
-        // switch (MADEIRA_JIT_IMAGE_RETIRE, off for every other session) gives that DLL
+        // switch (DANPORT_JIT_IMAGE_RETIRE, off for every other session) gives that DLL
         // fresh code instead of the unloaded one's translation. Dock sessions turn it on;
-        // an engine without the switch ignores the variable. env.MADEIRA_DOCK_IMAGE_RETIRE = 0
-        // leaves it off, and an explicit env.MADEIRA_JIT_IMAGE_RETIRE in madeira.cfg still wins.
-        let retire = SteamSignIn.flag("MADEIRA_DOCK_IMAGE_RETIRE", default: true)
-        if retire { setenv("MADEIRA_JIT_IMAGE_RETIRE", "1", 1) }
+        // an engine without the switch ignores the variable. env.DANPORT_DOCK_IMAGE_RETIRE = 0
+        // leaves it off, and an explicit env.DANPORT_JIT_IMAGE_RETIRE in danport.cfg still wins.
+        let retire = SteamSignIn.flag("DANPORT_DOCK_IMAGE_RETIRE", default: true)
+        if retire { setenv("DANPORT_JIT_IMAGE_RETIRE", "1", 1) }
         SteamLog.event("[dock-launch] image-retire=\(retire ? 1 : 0)")
         // While the loader loads Valve's client and its many imports, the emulator's
         // image-map handler can commit a page of its own heap under its interval lock; the
         // commit's notification then waits for that same lock and the host parks for good
-        // (no report after load-client-begin). Wine's opt-in MADEIRA_IMAGE_MAP_GUARD (off for
+        // (no report after load-client-begin). Wine's opt-in DANPORT_IMAGE_MAP_GUARD (off for
         // every other session) keeps the emulator's own memory calls un-notified there, as
         // on the syscall path. Dock sessions turn it on; ntdll without the switch ignores it.
-        // env.MADEIRA_DOCK_IMAGE_MAP_GUARD = 0 leaves it off.
-        let guardMap = SteamSignIn.flag("MADEIRA_DOCK_IMAGE_MAP_GUARD", default: true)
-        if guardMap { setenv("MADEIRA_IMAGE_MAP_GUARD", "1", 1) }
+        // env.DANPORT_DOCK_IMAGE_MAP_GUARD = 0 leaves it off.
+        let guardMap = SteamSignIn.flag("DANPORT_DOCK_IMAGE_MAP_GUARD", default: true)
+        if guardMap { setenv("DANPORT_IMAGE_MAP_GUARD", "1", 1) }
         SteamLog.event("[dock-launch] image-map-guard=\(guardMap ? 1 : 0)")
-        unsetenv("MADEIRA_DOCK_OFFLINE")
+        unsetenv("DANPORT_DOCK_OFFLINE")
     }
 
 }

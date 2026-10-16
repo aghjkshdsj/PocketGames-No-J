@@ -4,7 +4,7 @@
 #  - hello runs to exit 0
 #  - atomics, x87, difftest, bignum: output identical to native line for line ("run": run the guest
 #    natively here, x86-64 hosts; else <dir>/<test>.txt from a native run on an x86-64 host)
-#  - --scan-pe: every function of the Madeira x64 test programs in <pe-dir> decodes (0 missing)
+#  - --scan-pe: every function of the DanPort x64 test programs in <pe-dir> decodes (0 missing)
 set -uo pipefail
 G="$1"; ENG="$2"; NAME="$3"; NAT="$4"; PE="$5"
 summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -33,7 +33,7 @@ if ls "$PE"/*.exe > /dev/null 2>&1; then
     grep '^### ' "/tmp/${NAME}_scan.txt"
     total=$(grep -c '^### ' "/tmp/${NAME}_scan.txt"); clean=$(grep -c ' 0 not implemented' "/tmp/${NAME}_scan.txt")
     if [ "$total" -gt 0 ] && [ "$total" = "$clean" ]; then
-        echo "scan-pe: $clean/$total programs decode completely"; echo "- scan-pe: $clean/$total Madeira x64 programs decode completely" >> "$summary"
+        echo "scan-pe: $clean/$total programs decode completely"; echo "- scan-pe: $clean/$total DanPort x64 programs decode completely" >> "$summary"
     else
         echo "scan-pe: only $clean/$total programs decode completely"; echo "- scan-pe: **$clean/$total**" >> "$summary"; fail=1
     fi

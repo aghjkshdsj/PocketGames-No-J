@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 Jfishin, 125hz
-// Madeira Converter Exception: see LICENSE-EXCEPTION.md
+// DanPort Converter Exception: see LICENSE-EXCEPTION.md
 //
-// Derived from Jfishin's Madeira Steam client, used in Madeira with the
+// Derived from Jfishin's DanPort Steam client, used in DanPort with the
 // author's permission (see docs/STEAM_SIGNIN.md, "Provenance").
 
 #include "lzma_shim.h"

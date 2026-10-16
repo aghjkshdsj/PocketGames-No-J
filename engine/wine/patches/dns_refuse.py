@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Host names that resolve to nothing at once, for a Madeira Dock session without JIT.
+"""Host names that resolve to nothing at once, for a DanPort Dock session without JIT.
 
 Without JIT Valve's Steam client cannot finish a TLS handshake in time: its HTTPS request to the
 CM directory (api.steampowered.com) either times out after half a minute or never returns (build
@@ -14,7 +14,7 @@ it only for a Dock session without JIT) makes Wine's getaddrinfo answer "host no
 those names at once, so that request fails immediately. Nothing else changes: every other name
 resolves as before, and without the variable getaddrinfo is untouched.
 
-Applies to Wine's dlls/ws2_32/unixlib.c (Madeira's fork, which Madeira's ntdll-unix build
+Applies to Wine's dlls/ws2_32/unixlib.c (DanPort's fork, which DanPort's ntdll-unix build
 compiles into the app). Usage: dns_refuse.py <wine checkout>
 """
 import sys

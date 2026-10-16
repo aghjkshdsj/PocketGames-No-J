@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""No-JIT: Madeira's Mach exception server asks FXI first about a fault nothing else claimed.
+"""No-JIT: DanPort's Mach exception server asks FXI first about a fault nothing else claimed.
 
 FXI (PocketGamesNoJ's no-JIT x64 CPU) runs the program's x64 code on the thread's ARM64EC emulator
-stack. A wild guest pointer faults inside an FXI handler; Madeira's last-resort delivery
+stack. A wild guest pointer faults inside an FXI handler; DanPort's last-resort delivery
 (ios_mach_deliver_guest_exception) then looks for the thread's TEB by stack containment, finds
 none (the emulator stack is not the TEB's stack, and x18 can be 0), and falls back to a
 best-effort delivery: it worked once (build 76) and left the thread stuck at the fault the next
@@ -16,7 +16,7 @@ and the address is not mapped at all; it then rewrites the state to enter its ow
 and the server writes the state back as for any handled fault. With JIT, FXI is not the CPU:
 the hook declines (no thread is registered).
 
-Usage: nojit_fault_hook.py <madeira checkout>. Idempotent (marker line).
+Usage: nojit_fault_hook.py <danport checkout>. Idempotent (marker line).
 """
 import sys
 

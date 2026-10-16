@@ -1,25 +1,25 @@
 #!/bin/bash
 # Stage DXMT into the app build (run by the IPA workflow after Wine is staged):
 #   - libdxmt_combined.a from the "Stage 3 - DXMT" workflow (engine/dxmt/out)
-#   - Madeira's d3d12/ folder (Metal Shader Converter dylib, dlopened at runtime)
+#   - DanPort's d3d12/ folder (Metal Shader Converter dylib, dlopened at runtime)
 # Writes Config/DXMT.xcconfig and App/Generated/dxmt_version.h.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HERE="$ROOT/engine/dxmt"
 LIB="$HERE/out/libdxmt_combined.a"
-# Wine's stage-app.sh has already checked out Madeira here.
-A="$ROOT/engine/wine/madeira/app/Madeira"
+# Wine's stage-app.sh has already checked out DanPort here.
+A="$ROOT/engine/wine/danport/app/DanPort"
 
 [ -s "$LIB" ] || { echo "missing $LIB (run the DXMT workflow first)"; exit 1; }
 [ -d "$A" ] || { echo "Wine is not staged; DXMT needs it"; exit 1; }
 ls "$A/d3d12/libmetalirconverter.dylib" > /dev/null
 
-# The library must come from the same Madeira commit as the staged Wine side.
-WANT="$(git -C "$ROOT/engine/wine/madeira" rev-parse HEAD)"
-HAVE="$(cat "$HERE/out/MADEIRA_SHA")"
-[ "$WANT" = "$HAVE" ] || { echo "DXMT built from Madeira $HAVE, Wine staged from $WANT"; exit 1; }
+# The library must come from the same DanPort commit as the staged Wine side.
+WANT="$(git -C "$ROOT/engine/wine/danport" rev-parse HEAD)"
+HAVE="$(cat "$HERE/out/DANPORT_SHA")"
+[ "$WANT" = "$HAVE" ] || { echo "DXMT built from DanPort $HAVE, Wine staged from $WANT"; exit 1; }
 
-# Our rebuilt D3D12 cube (colour writes enabled) replaces Madeira's copy.
+# Our rebuilt D3D12 cube (colour writes enabled) replaces DanPort's copy.
 if [ -s "$HERE/out/d3d12-cube-x64.exe" ]; then
     cp "$HERE/out/d3d12-cube-x64.exe" "$A/arm64ec-windows/d3d12-cube-x64.exe"
     echo "staged fixed d3d12-cube-x64.exe"
@@ -37,7 +37,7 @@ H
 python3 - "$ROOT/project.yml" <<'PY'
 import sys
 p = sys.argv[1]
-lines = ["      - path: engine/wine/madeira/app/Madeira/d3d12",
+lines = ["      - path: engine/wine/danport/app/DanPort/d3d12",
          "        type: folder",
          "        buildPhase: resources"]
 s = open(p).read()

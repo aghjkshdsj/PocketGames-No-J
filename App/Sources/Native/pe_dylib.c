@@ -362,7 +362,7 @@ static bool check_x18(const pe_image *pe) {
     return ok;
 }
 
-// Wine's real ntdll.dll (ARM64EC, Madeira's build), its x18 uses rewritten at build time.
+// Wine's real ntdll.dll (ARM64EC, DanPort's build), its x18 uses rewritten at build time.
 // Only self-contained functions: nothing here needs ntdll's own initialisation.
 static bool run_ntdll(const pe_image *pe, const char *name, char *line, size_t linelen) {
     uint32_t (*crc)(uint32_t, const void *, int) = pe_export(pe, "RtlComputeCrc32");

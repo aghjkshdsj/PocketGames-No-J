@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The DualSense HID pad can be there for every session and still be absent in Xbox mode.
 
-Madeira's wineserver creates its HID controller (build/wineserver/hidpad_ios.c, ml2101) once,
-when the session starts, from MADEIRA_HIDPAD; a game finds it through setupapi and opens it.
+DanPort's wineserver creates its HID controller (build/wineserver/hidpad_ios.c, ml2101) once,
+when the session starts, from DANPORT_HIDPAD; a game finds it through setupapi and opens it.
 PocketGamesNoJ lets the player switch between an Xbox and a PlayStation controller at any time,
 including between the games of one kept session (session reuse: the wineserver outlives a game),
 so it now always creates the DualSense, and the app says whether it is there: while the app
@@ -15,7 +15,7 @@ there keeps working, at rest when the app stops publishing.
 
 `pocketgamesnoj_hidpad_gate` tells the app this build has the gate (it then always asks for the
 DualSense; without it, it asks only in PlayStation mode, as before).
-Usage: hidpad_gate.py <madeira checkout>
+Usage: hidpad_gate.py <danport checkout>
 """
 import sys
 

@@ -25,7 +25,7 @@ struct SteamSignInView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Sign in to Steam", systemImage: "person.crop.circle.fill").font(.title2.bold())
-                        Text("Madeira keeps a Steam sign-in so it can start your Steam games with your own account.")
+                        Text("PocketGames No J keeps a Steam sign-in so it can start your Steam games with your own account.")
                             .foregroundStyle(.secondary)
                     }.padding(.vertical, 4)
                 }
@@ -47,7 +47,7 @@ struct SteamSignInView: View {
                     Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
                 }
                 Section {
-                    Text("Madeira signs in with Steam directly. Your password is sent only to Steam and is never stored. A sign-in token is kept in this device's Keychain until you sign out.")
+                    Text("PocketGames No J signs in with Steam directly. Your password is sent only to Steam and is never stored. A sign-in token is kept in this device's Keychain until you sign out.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

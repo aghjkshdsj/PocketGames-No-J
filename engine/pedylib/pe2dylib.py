@@ -24,7 +24,7 @@ build 43 (docs/INTERPRETERS.md).
                              clears) in ARM64 code; convert rewrites them
              x18 unpatchable sites the rewrite cannot handle (sp-based, no free register)
              tsd reads       hand-written `mrs TPIDRRO_EL0` TEB reads with a slot offset
-                             patched at load (Madeira's FEX module only)
+                             patched at load (DanPort's FEX module only)
 
 Usage:
   pe2dylib.py convert DLL OUTDIR [--strict]
@@ -195,7 +195,7 @@ def page_sets(pe):
 
 
 # --- x18 (the Windows TEB register; iOS does not preserve it) -------------------------------
-# Classifier ported from Madeira's ios_insn_x18_role (build/ntdll-unix/virtual_ios.c).
+# Classifier ported from DanPort's ios_insn_x18_role (build/ntdll-unix/virtual_ios.c).
 ROLE_RN, ROLE_RM, ROLE_RT2 = 1, 2, 3
 
 
@@ -217,7 +217,7 @@ def x18_role(insn):
         if rn == 18:
             return ROLE_RN
         # Rt2 is a general register only when V (bit 26) is clear: `stp q21, q18, [sp]` stores
-        # vector register 18, not x18 (Madeira's classifier takes it for x18 too; the rewrite
+        # vector register 18, not x18 (DanPort's classifier takes it for x18 too; the rewrite
         # then put a scratch GPR's number in the vector field).
         if rt2 == 18 and not (insn >> 26) & 1:
             return ROLE_RT2

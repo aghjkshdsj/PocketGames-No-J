@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # The newest successful run of a stage workflow for this build's branch, else main's.
 #   tools/latest-run.sh <workflow file>    (GH_TOKEN, GITHUB_REPOSITORY, GITHUB_REF_NAME set)
-# Branch first, so a side branch that rebuilds a stage (another Madeira pin) never feeds
+# Branch first, so a side branch that rebuilds a stage (another DanPort pin) never feeds
 # main's IPA, and main never picks up a side branch's libraries.
 set -euo pipefail
 wf="${1:?workflow file}"

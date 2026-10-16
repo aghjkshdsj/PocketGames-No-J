@@ -2,11 +2,11 @@
 # Stage 2: build Wine's unix side for iOS arm64 as static libraries.
 #   engine/wine/build-unix.sh <step>
 # Steps (run in order; each is resumable):
-#   fetch      Madeira checkout + its Wine fork (shallow, pinned)
+#   fetch      DanPort checkout + its Wine fork (shallow, pinned)
 #   configure  wine/build-macos: config.h, generated IDL headers, host tools
 #   deps       GnuTLS/Nettle/GMP, FFmpeg (LGPL config), FreeType for iOS
-#   ntdll      libntdll_unix.a   (Madeira build/ntdll-unix)
-#   win32u     libwin32u_unix.a  (Madeira build/win32u-unix)
+#   ntdll      libntdll_unix.a   (DanPort build/ntdll-unix)
+#   win32u     libwin32u_unix.a  (DanPort build/win32u-unix)
 #   wineserver libwineserver.a   (reproducible rebuild, see build_wineserver)
 #   collect    copy the libraries to engine/wine/out
 set -euo pipefail
@@ -14,7 +14,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HERE="$ROOT/engine/wine"
 # shellcheck disable=SC1091
 source "$HERE/PIN"
-M="$HERE/madeira"          # Madeira checkout; its scripts expect this layout
+M="$HERE/danport"          # DanPort checkout; its scripts expect this layout
 W="$M/wine"
 OUT="$HERE/out"
 JOBS="$(sysctl -n hw.ncpu)"
@@ -22,15 +22,10 @@ TC="$M/toolchains/$LLVM_MINGW/bin"
 export PATH="$TC:$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$(brew --prefix llvm)/bin:$PATH"
 
 step_fetch() {
-    if [ ! -d "$M/.git" ] || [ "$(git -C "$M" rev-parse HEAD)" != "$MADEIRA_SHA" ]; then
-        rm -rf "$M"
-        git init -q "$M"
-        git -C "$M" remote add origin "$MADEIRA_REPO"
-        git -C "$M" fetch -q --depth 1 origin "$MADEIRA_SHA"
-        git -C "$M" checkout -q FETCH_HEAD
-    fi
+    python3 "$ROOT/tools/port_source.py" checkout "$M" --repository-id "$DANPORT_REPOSITORY_ID" --ref "$DANPORT_SHA"
     if [ ! -d "$W/.git" ] && [ ! -f "$W/.git" ] || [ "$(git -C "$W" rev-parse HEAD 2>/dev/null)" != "$WINE_SHA" ]; then
         git -C "$M" submodule update --init --depth 1 wine
+        python3 "$ROOT/tools/port_source.py" normalize "$M"
     fi
     git -C "$W" rev-parse HEAD
     if [ ! -x "$TC/aarch64-w64-mingw32-clang" ]; then
@@ -58,9 +53,9 @@ step_configure() {
             --without-gphoto --without-pcsclite --without-inotify --without-dbus --without-ffmpeg \
             > configure.log 2>&1 || { tail -60 configure.log; return 1; }
     fi
-    # Madeira's tree was configured with GnuTLS present: bcrypt, secur32 and
+    # DanPort's tree was configured with GnuTLS present: bcrypt, secur32 and
     # crypt32 compile their GnuTLS backends only then. On iOS the library is
-    # linked statically and Madeira's ios_gnutls_shim.h routes this dlopen to it.
+    # linked statically and DanPort's ios_gnutls_shim.h routes this dlopen to it.
     if ! grep -q 'PocketGamesNoJ gnutls' include/config.h; then
         printf '
 /* PocketGamesNoJ gnutls */
@@ -87,8 +82,10 @@ step_ntdll() {
     git -C "$M" checkout -- build/ntdll-unix/virtual_ios.c build/ntdll-unix/loader_ios.c build/ntdll-unix/process_ios.c \
         build/ntdll-unix/env_ios.c build/ntdll-unix/signal_arm64_ios.c build/ntdll-unix/server_ios.c \
         build/ntdll-unix/thread_ios.c build/ntdll-unix/audio_null_ios.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     git -C "$W" checkout -- dlls/ntdll/unix/sync.c dlls/ws2_32/unixlib.c
-    # Madeira Dock without JIT: named hosts resolve to nothing at once (engine/wine/patches/dns_refuse.py).
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
+    # DanPort Dock without JIT: named hosts resolve to nothing at once (engine/wine/patches/dns_refuse.py).
     python3 "$HERE/patches/dns_refuse.py" "$W"
     python3 "$HERE/patches/nojit_dylib.py" "$M"
     # Another game in the running session: process socket entries reused, a killed main thread ends its
@@ -116,24 +113,26 @@ s = s.replace("XP_MS( ru.ri_page_wait_time_mach - pru.ri_page_wait_time_mach )",
 open(p, "w").write(s)
 PY
     bash "$M/build/ntdll-unix/build.sh"
-    test -s "$M/app/Madeira/libntdll_unix.a"
+    test -s "$M/app/DanPort/libntdll_unix.a"
 }
 
 step_win32u() {
     # A click on a dialog's button reaches it (engine/wine/patches/click_activation.py). Start
     # from the pristine files: the checkout is cached.
     git -C "$M" checkout -- build/win32u-unix/message_ios.c build/win32u-unix/class_ios.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     git -C "$M/wine" checkout -- dlls/win32u/window.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     python3 "$HERE/patches/click_activation.py" "$M"
     # [winproc] diagnostics for a later program in a kept session (engine/wine/patches/session_reuse.py).
     python3 "$HERE/patches/session_reuse.py" "$M" win32u
     bash "$M/build/win32u-unix/build.sh"
-    test -s "$M/app/Madeira/libwin32u_unix.a"
+    test -s "$M/app/DanPort/libwin32u_unix.a"
 }
 
-# Madeira's build/wineserver/build.sh patches objects into a prebuilt archive
+# DanPort's build/wineserver/build.sh patches objects into a prebuilt archive
 # that is not in its repository. Rebuild the whole archive from source with the
-# same flags: every wine/server/*.c, Madeira's *_ios.c replacements where they
+# same flags: every wine/server/*.c, DanPort's *_ios.c replacements where they
 # exist, its extra objects, then the same symbol renames.
 build_wineserver() {
     local B="$M/build/wineserver" O="$HERE/obj-wineserver"
@@ -151,17 +150,20 @@ build_wineserver() {
     # The app's Force quit for a kept session, and a thread that ended itself but whose pipe never
     # closed (engine/wine/patches/session_reuse.py). Start from the pristine files: the checkout is cached.
     git -C "$M" checkout -- build/wineserver/request_ios.c build/wineserver/fd_ios.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     git -C "$W" checkout -- server/process.c server/thread.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     python3 "$HERE/patches/session_reuse.py" "$M" server
     # The DualSense HID pad is there for every session, absent unless the app shows a PlayStation pad
     # (engine/wine/patches/hidpad_gate.py).
     git -C "$M" checkout -- build/wineserver/hidpad_ios.c
+    python3 "$ROOT/tools/port_source.py" normalize "$M"
     python3 "$HERE/patches/hidpad_gate.py" "$M"
     local fail=0 src name repl
     for src in "$W"/server/*.c; do
         name="$(basename "$src" .c)"
         repl="$B/${name}_ios.c"
-        # Madeira compiles these from the submodule even though *_ios.c exists for some.
+        # DanPort compiles these from the submodule even though *_ios.c exists for some.
         case "$name" in process) repl="" ;; esac
         [ -n "$repl" ] && [ -f "$repl" ] && src="$repl"
         xcrun -sdk iphoneos clang "${FLAGS[@]}" -c "$src" -o "$O/$name.o" 2> "$O/$name.err" ||
@@ -178,27 +180,27 @@ build_wineserver() {
         -Wno-implicit-function-declaration -c "$B/wineserver_ios_kill.c" -o "$O/wineserver_ios_kill.o" || fail=1
     [ "$fail" = 0 ] || return 1
 
-    # Symbols that collide with win32u-unix / ntdll-unix in one process (see Madeira's script).
+    # Symbols that collide with win32u-unix / ntdll-unix in one process (see DanPort's script).
     local syms=(alloc_user_handle free_user_handle get_virtual_screen_rect destroy_thread_windows
         get_window_thread is_desktop_class is_message_class is_window_visible mirror_region
         send_notify_message shared_session user_shared_data)
     local args=() s f
     for s in "${syms[@]}"; do args+=(--redefine-sym "_${s}=_ws_${s}"); done
     for f in "$O"/*.o; do llvm-objcopy "${args[@]}" "$f"; done
-    rm -f "$M/app/Madeira/libwineserver.a"
-    xcrun --sdk iphoneos ar rcs "$M/app/Madeira/libwineserver.a" "$O"/*.o
-    ls -la "$M/app/Madeira/libwineserver.a"
+    rm -f "$M/app/DanPort/libwineserver.a"
+    xcrun --sdk iphoneos ar rcs "$M/app/DanPort/libwineserver.a" "$O"/*.o
+    ls -la "$M/app/DanPort/libwineserver.a"
 }
 
 step_collect() {
     mkdir -p "$OUT"
     for l in libntdll_unix libwin32u_unix libwineserver; do
-        if [ -f "$M/app/Madeira/$l.a" ]; then cp "$M/app/Madeira/$l.a" "$OUT/"; fi
+        if [ -f "$M/app/DanPort/$l.a" ]; then cp "$M/app/DanPort/$l.a" "$OUT/"; fi
     done
     for l in libgmp libgnutls libhogweed libnettle libavformat libavcodec libswresample libavutil; do
-        if [ -f "$M/app/Madeira/$l.a" ]; then cp "$M/app/Madeira/$l.a" "$OUT/"; fi
+        if [ -f "$M/app/DanPort/$l.a" ]; then cp "$M/app/DanPort/$l.a" "$OUT/"; fi
     done
-    git -C "$M" rev-parse HEAD > "$OUT/MADEIRA_SHA"
+    git -C "$M" rev-parse HEAD > "$OUT/DANPORT_SHA"
     ls -la "$OUT"
 }
 

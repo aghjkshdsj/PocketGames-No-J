@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Metal objects of an ended 32-bit game (docs/SESSION_REUSE.md).
 
-DXMT's winemetal (src/winemetal/unix/winemetal_unix.c, GPL-3.0-or-later, Madeira's DXMT fork)
+DXMT's winemetal (src/winemetal/unix/winemetal_unix.c, GPL-3.0-or-later, DanPort's DXMT fork)
 creates a Metal texture or buffer for a game and hands it the +1 reference; the game gives it
 back with NSObject_release. A game that ends without releasing them (ExitProcess skips most
 teardown, a Force quit skips all of it) leaves them alive for the app run: with session reuse

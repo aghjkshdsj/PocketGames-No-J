@@ -52,7 +52,7 @@ void mid_capture_stdio(void) {
 }
 
 
-/* Madeira's bridge points Wine's stdout/stderr (and wineserver's log) at
+/* DanPort's bridge points Wine's stdout/stderr (and wineserver's log) at
  * Documents/wine-log.txt. Follow that file and copy its lines into the
  * PocketGamesNoJ log so one log has everything. */
 static void *wine_log_follower(void *arg) {
@@ -116,8 +116,8 @@ static int g_booted;
 static int g_programs;     /* Windows programs started in this app run (session reuse) */
 static int g_reuse_armed;  /* the running session started with PocketGamesNoJ_SESSION_REUSE=1 */
 
-/* Madeira's IOSDisplayShim.m and Winios.m (staged app sources). */
-extern void madeira_display_set_layer(void *layer);
+/* DanPort's IOSDisplayShim.m and Winios.m (staged app sources). */
+extern void danport_display_set_layer(void *layer);
 extern void winios_screen_size(int *w, int *h);
 extern void winios_set_compositor_frame(double x, double y, double w, double h);
 extern void winios_set_desktop_rect(double x, double y, double w, double h, int set);
@@ -158,13 +158,13 @@ int mid_hidpad_gate(void) {
 #endif
 }
 
-/* Madeira's PadOutput.m (staged app source; its GCController parameter is an object pointer). */
-extern void madeira_pad_output_configure(int xinput, int hid);
-extern void madeira_pad_output_set_slot(int slot, void *controller);
-extern void madeira_pad_output_set_active(int active);
-void mid_pad_output_configure(int xinput, int hid) { madeira_pad_output_configure(xinput, hid); }
-void mid_pad_output_set_slot(int slot, void *controller) { madeira_pad_output_set_slot(slot, controller); }
-void mid_pad_output_set_active(int active) { madeira_pad_output_set_active(active); }
+/* DanPort's PadOutput.m (staged app source; its GCController parameter is an object pointer). */
+extern void danport_pad_output_configure(int xinput, int hid);
+extern void danport_pad_output_set_slot(int slot, void *controller);
+extern void danport_pad_output_set_active(int active);
+void mid_pad_output_configure(int xinput, int hid) { danport_pad_output_configure(xinput, hid); }
+void mid_pad_output_set_slot(int slot, void *controller) { danport_pad_output_set_slot(slot, controller); }
+void mid_pad_output_set_active(int active) { danport_pad_output_set_active(active); }
 
 extern void winios_post_key(int vk, int down);
 extern void winios_pointer(int x, int y, unsigned int flags, unsigned int data);
@@ -184,10 +184,10 @@ void mid_game_overlay_show(int shown, void *window) { winios_game_overlay_show(s
 extern int winios_game_picture_rect(int dw, int dh, int *x, int *y, int *w, int *h);   /* Winios.m, engine/wine/stage-app.sh */
 int mid_game_picture_rect(int dw, int dh, int *x, int *y, int *w, int *h) { return winios_game_picture_rect(dw, dh, x, y, w, h); }
 
-extern void madeira_seed_prefix_if_needed(const char *prefix_path);
-void mid_wine_seed_prefix(const char *prefix) { madeira_seed_prefix_if_needed(prefix); }
+extern void danport_seed_prefix_if_needed(const char *prefix_path);
+void mid_wine_seed_prefix(const char *prefix) { danport_seed_prefix_if_needed(prefix); }
 
-void mid_display_set_layer(void *metal_layer) { madeira_display_set_layer(metal_layer); }
+void mid_display_set_layer(void *metal_layer) { danport_display_set_layer(metal_layer); }
 void mid_display_screen_size(int *w, int *h) { winios_screen_size(w, h); }
 void mid_display_layout(double fx, double fy, double fw, double fh,
                         double rx, double ry, double rw, double rh) {
@@ -233,8 +233,8 @@ static bool boot_next(const char *prefix, const char *exe, const char *args, cha
         return false;
     }
     wine_exit_status_reset();   /* the last program's error is not this one's */
-    setenv("MADEIRA_EXE", exe, 1);
-    if (args && *args) setenv("MADEIRA_ARGS", args, 1); else unsetenv("MADEIRA_ARGS");
+    setenv("DANPORT_EXE", exe, 1);
+    if (args && *args) setenv("DANPORT_ARGS", args, 1); else unsetenv("DANPORT_ARGS");
     /* The x64 blocks (FXI's, and FXR's: fxr_win_shim.c) are shared by the session's processes: an
      * earlier program's code may be gone and its addresses reused by this one. */
     unsigned dropped = fxi_win_invalidate_all() + mid_fxr_win_invalidate_all();
@@ -277,8 +277,8 @@ bool mid_wine_boot(const char *prefix, const char *exe, const char *args, char *
     } else {
         mid_log("[wine] WARNING: 0x140000000 window not held; fixed-base .exe images will be displaced");
     }
-    setenv("MADEIRA_EXE", exe, 1);
-    if (args && *args) setenv("MADEIRA_ARGS", args, 1); else unsetenv("MADEIRA_ARGS");
+    setenv("DANPORT_EXE", exe, 1);
+    if (args && *args) setenv("DANPORT_ARGS", args, 1); else unsetenv("DANPORT_ARGS");
     mid_capture_stdio();
     follow_wine_log(prefix);
     mid_log("[wine] signed DLLs from %s", getenv("PocketGamesNoJ_PE_DIR"));

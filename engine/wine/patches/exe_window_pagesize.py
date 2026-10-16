@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A fixed-base main image keeps its address across games: compare the claim in host pages.
 
-Madeira's virtual_ios.c gives a 64-bit program whose relocations are stripped (it can only run at
+DanPort's virtual_ios.c gives a 64-bit program whose relocations are stripped (it can only run at
 its ImageBase, e.g. Dokimon.exe at 0x140000000) the executable window, and hands that address on
 when the program exits so the next copy can run there (ml988: ios_exe_win_claim records the
 pending interval, map_image_view confirms it with ios_exe_win_commit_claim, the exiting process
@@ -12,10 +12,10 @@ the image view's own size, a multiple of 4 KB. For an image whose size is not a 
 they differ, the confirmation is taken for someone else's and does nothing: the image is never
 OWNED, its exit retires nothing, and the same program started again in a kept session (session
 reuse, docs/SESSION_REUSE.md) cannot map at its address and fails with STATUS_CONFLICTING_ADDRESSES
-(build 183: Dokimon through Madeira Dock, second start, c0000018).
+(build 183: Dokimon through DanPort Dock, second start, c0000018).
 
 The confirmation now rounds the size to the host page, as the claim did, so the held and retired
-interval is the one the next claim asks for. Usage: exe_window_pagesize.py <madeira checkout>
+interval is the one the next claim asks for. Usage: exe_window_pagesize.py <danport checkout>
 """
 import sys
 

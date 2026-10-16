@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """DirectInput's iOS joystick (32-bit farm): an Rz axis on the right stick, and the triggers as buttons.
 
-Madeira's dlls/dinput/joystick_ios.c reports Windows' XUSB layout: X/Y left stick, Rx/Ry right
+DanPort's dlls/dinput/joystick_ios.c reports Windows' XUSB layout: X/Y left stick, Rx/Ry right
 stick, Z both triggers, ten buttons, no Rz. A game's DIJOYSTATE still has an lRz field, and an
 axis the device lacks comes back as 0 (device.c GetDeviceState zero-fills it), the far end of
 the default 0..65535 range. A game made for PlayStation-style DirectInput pads, whose right stick
@@ -11,7 +11,7 @@ stick held up and scrolls its menus forever. Here Rz is the right stick's vertic
 at rest like every other axis, and buttons 11 and 12 are the left and right triggers (past
 XInput's threshold), so such a game's trigger actions (Steins;Gate's phone) can be assigned.
 
-Applied to the i386 farm only (engine/wine/build-i386.sh): 64-bit games keep Madeira's
+Applied to the i386 farm only (engine/wine/build-i386.sh): 64-bit games keep DanPort's
 prebuilt dinput.
 Usage: dinput_ios_pad.py <wine tree>
 """
@@ -56,8 +56,8 @@ FIXES = [
      "    for (i = 0; i < IOS_BUTTON_COUNT; ++i) if (buttons[i]) btn |= 1u << i;\n"),
     ("    BYTE buttons[10];\n",
      "    BYTE buttons[IOS_BUTTON_COUNT];\n"),
-    ("pad-env=MADEIRA_DINPUT_PAD trace=state+raw+range+format@1Hz\";",
-     "pad-env=MADEIRA_DINPUT_PAD trace=state+raw+range+format@1Hz \"\n"
+    ("pad-env=DANPORT_DINPUT_PAD trace=state+raw+range+format@1Hz\";",
+     "pad-env=DANPORT_DINPUT_PAD trace=state+raw+range+format@1Hz \"\n"
      "    \"pocketgamesnoj=Rz(right-stick-Y)+buttons11-12(LT,RT)\";"),
 ]
 

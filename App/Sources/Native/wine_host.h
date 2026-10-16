@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Stage 2 host side for Wine (Madeira's iOS port): hands Wine a slice of
+// Stage 2 host side for Wine (DanPort's iOS port): hands Wine a slice of
 // PocketGamesNoJ's JIT pool and starts wineserver + the Windows process in-process.
 
 #ifndef PocketGamesNoJ_WINE_HOST_H
@@ -61,7 +61,7 @@ void mid_display_layout(double fx, double fy, double fw, double fh,
 void mid_pad_set(int slot, int connected, uint16_t buttons, uint8_t lt, uint8_t rt,
                  int16_t lx, int16_t ly, int16_t rx, int16_t ry);
 
-/// Player 1 as the HID gamepad (MADEIRA_HIDPAD sessions): same units as
+/// Player 1 as the HID gamepad (DANPORT_HIDPAD sessions): same units as
 /// mid_pad_set; L2/R2 digital bits follow the triggers. No-op without Wine.
 void mid_hidpad_set(int connected, uint32_t buttons, uint8_t lt, uint8_t rt,
                     int16_t lx, int16_t ly, int16_t rx, int16_t ry);
@@ -70,7 +70,7 @@ void mid_hidpad_set(int connected, uint32_t buttons, uint8_t lt, uint8_t rt,
 /// (engine/wine/patches/hidpad_gate.py): the pad can then exist in every session.
 int mid_hidpad_gate(void);
 
-/// Rumble, lightbar and adaptive triggers from the game to the controller (Madeira's PadOutput.m):
+/// Rumble, lightbar and adaptive triggers from the game to the controller (DanPort's PadOutput.m):
 /// configure once per session; a slot's GCController (NULL: none); the app active or not.
 void mid_pad_output_configure(int xinput, int hid);
 void mid_pad_output_set_slot(int slot, void *controller);

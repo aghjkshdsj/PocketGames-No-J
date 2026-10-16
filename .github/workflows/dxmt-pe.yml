@@ -1,10 +1,13 @@
 name: Stage 3b - D3D DLLs (16 KB aligned)
 
-# No-JIT step 5: DXMT's Windows side (winemetal, d3d11, d3d10core, dxgi) and Madeira's D3D12
+# No-JIT step 5: DXMT's Windows side (winemetal, d3d11, d3d10core, dxgi) and DanPort's D3D12
 # DLLs rebuilt with 16 KB section alignment (engine/dxmt/build-pe.sh), so the IPA build can
 # wrap them as signed dylibs. build-ipa.yml puts the newest successful set into the DLL farm.
 on:
   workflow_dispatch:
+
+env:
+  GH_TOKEN: ${{ github.token }}
 
 permissions:
   contents: read
@@ -27,17 +30,17 @@ jobs:
           xcodebuild -version
           xcodebuild -downloadComponent MetalToolchain > /dev/null 2>&1 || true
 
-      # The Wine stage's checkout (Madeira, its Wine fork, llvm-mingw) as a head start.
+      # The Wine stage's checkout (DanPort, its Wine fork, llvm-mingw) as a head start.
       - name: Restore checkout
         uses: actions/cache/restore@v4
         with:
-          path: engine/wine/madeira
+          path: engine/wine/danport
           key: dxmt-pe-${{ hashFiles('engine/wine/PIN', 'engine/dxmt/PIN') }}-v1-${{ github.run_id }}
           restore-keys: |
             dxmt-pe-${{ hashFiles('engine/wine/PIN', 'engine/dxmt/PIN') }}-v1-
             wine-unix-${{ hashFiles('engine/wine/PIN') }}-v1-
 
-      - name: Fetch Madeira, Wine fork, DXMT
+      - name: Fetch DanPort, Wine fork, DXMT
         run: bash engine/dxmt/build-pe.sh fetch
 
       - name: Wine ARM64EC tree (winebuild, winecrt0, ntdll/dbghelp import libs)
@@ -47,7 +50,7 @@ jobs:
         id: dxmt
         run: bash engine/dxmt/build-pe.sh dxmt
 
-      - name: Madeira D3D12 DLLs
+      - name: DanPort D3D12 DLLs
         id: d3d12
         continue-on-error: true
         run: bash engine/dxmt/build-pe.sh d3d12
@@ -64,7 +67,7 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: engine/wine/madeira
+          path: engine/wine/danport
           key: dxmt-pe-${{ hashFiles('engine/wine/PIN', 'engine/dxmt/PIN') }}-v1-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v5
@@ -78,8 +81,8 @@ jobs:
         with:
           name: d3d-pe-logs
           path: |
-            engine/wine/madeira/wine/build-arm64ec/*.log
-            engine/wine/madeira/dxmt/build-arm64ec-16k*/meson-logs/*.txt
+            engine/wine/danport/wine/build-arm64ec/*.log
+            engine/wine/danport/dxmt/build-arm64ec-16k*/meson-logs/*.txt
           if-no-files-found: ignore
 
       - name: Rebuild the IPA with these DLLs

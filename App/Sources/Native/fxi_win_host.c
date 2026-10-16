@@ -323,14 +323,14 @@ static long host_reset_to_consistent(const uint8_t *rec, const uint8_t *arm_ctx)
 }
 
 // ---- Wild guest pointers (build 78) ----
-// A wild guest pointer faults inside an FXI handler. Madeira's Mach handler then looks for the
+// A wild guest pointer faults inside an FXI handler. DanPort's Mach handler then looks for the
 // thread's TEB by stack containment; FXI's emulator stack is not the TEB's stack, so it fell
 // back to a best-effort delivery that worked once (build 76) and left the thread stuck the
-// next time (build 77). Madeira's Mach server now asks FXI first (mid_fxi_mach_fault, called
+// next time (build 77). DanPort's Mach server now asks FXI first (mid_fxi_mach_fault, called
 // before its last-resort delivery, engine/wine/patches/nojit_fault_hook.py): when the thread
 // is in simulation and the address is not mapped at all (wild or null pointers, non-canonical
 // values), the thread is redirected to fault_entry, which raises the x64 access violation the
-// way host_reset_to_consistent does. Everything else stays Madeira's.
+// way host_reset_to_consistent does. Everything else stays DanPort's.
 #define FAULT_THREADS 1024
 // cpu is set once the thread has one (FxiCpus are never freed); area and teb belong to Wine and
 // are gone once the thread exits, so the profiler reads them only with vm_read_overwrite.
@@ -599,7 +599,7 @@ static int prof_cmp_hit(const void *a, const void *b) {
 }
 
 // ---- Callers of the hot code (build 179) ----
-// The hottest instructions say what runs, not why: Valve's client inside Madeira Dock spent its
+// The hottest instructions say what runs, not why: Valve's client inside DanPort Dock spent its
 // whole no-JIT sign-in in OpenSSL's bn_mul_mont, which elliptic curves, RSA and DH all use. Each
 // x64 sample also reads the top 4 KB of the guest stack and counts every value there that lies
 // in a module and follows a call instruction (a return address: a caller, a caller's caller, ...),
@@ -892,8 +892,8 @@ static int address_mapped(uint64_t a) {
     return r <= a;   // the region found starts at or below a: a lies in it
 }
 
-// Called by Madeira's Mach exception server for an EXC_BAD_ACCESS nothing else claimed, with
-// the faulting thread suspended. 1 = *state now enters fault_entry (Madeira writes it back).
+// Called by DanPort's Mach exception server for an EXC_BAD_ACCESS nothing else claimed, with
+// the faulting thread suspended. 1 = *state now enters fault_entry (DanPort writes it back).
 int mid_fxi_mach_fault(mach_port_t thread, arm_thread_state64_t *state, uint64_t fault_addr) {
     uint8_t *area = fault_thread_area(thread);
     if (!area || !area[0]) return 0;                       // not in simulation

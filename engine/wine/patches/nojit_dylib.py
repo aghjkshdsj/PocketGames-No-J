@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""No-JIT step B (docs/INTERPRETERS.md): Madeira's ntdll unix side maps PE images from the
+"""No-JIT step B (docs/INTERPRETERS.md): DanPort's ntdll unix side maps PE images from the
 signed dylibs engine/pedylib built, instead of copying them into the JIT pool.
 
 Active only when WINE_IOS_NOJIT=1 (the app sets it, with PocketGamesNoJ_PE_DIR, when it boots
@@ -24,7 +24,7 @@ PocketGamesNoJ_PE_DIR as always, aarch64 images from PocketGamesNoJ_PE_DIR_A64, 
 dylib (they are data inside a 32-bit process's guest window, decoded by the interpreter), and
 no page inside a guest window is ever given execute permission.
 
-Usage: nojit_dylib.py <madeira checkout>. Idempotent (marker line).
+Usage: nojit_dylib.py <danport checkout>. Idempotent (marker line).
 """
 import sys
 
@@ -126,7 +126,7 @@ static int ios_nojit_mprotect( void *base, size_t size, int unix_prot, int *ret 
     }
     /* A 32-bit process's guest window (docs/INTERPRETERS.md): x86 code there is data the
      * interpreter decodes, so an executable request is plain memory (PAGE_EXECUTE alone is
-     * readable, as Madeira's ml1030 does), and none of Madeira's JIT-pool paths for window pages
+     * readable, as DanPort's ml1030 does), and none of DanPort's JIT-pool paths for window pages
      * is reached. Only a WoW64 process has a window. */
     if (ios_wow_in_window( base ))
     {

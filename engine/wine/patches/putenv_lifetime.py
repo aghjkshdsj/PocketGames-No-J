@@ -9,8 +9,8 @@ exec, so the environment ends up pointing into a dead thread's stack. iOS's own 
 the environment later (build 52: the keyboard's dictation network check, ~10 s after a
 Windows program exited) and crashes reading freed memory.
 
-Give putenv a heap copy that is never freed instead. Applies to Madeira's
-build/ntdll-unix/loader_ios.c and process_ios.c. Usage: putenv_lifetime.py <madeira checkout>
+Give putenv a heap copy that is never freed instead. Applies to DanPort's
+build/ntdll-unix/loader_ios.c and process_ios.c. Usage: putenv_lifetime.py <danport checkout>
 """
 import sys
 

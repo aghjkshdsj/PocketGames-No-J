@@ -8,8 +8,8 @@ library and downloads use) and Steam's published Cloud service messages. On by d
 
 Code: `App/Sources/Steam/SteamCloudCore.swift` (the decisions, Foundation only, host-tested),
 `SteamCloudSync.swift` (transfers, backups, the per-game record, game sessions),
-`App/Sources/UI/SteamCloudView.swift` (the game's Steam Cloud section). Ported from Madeira
-(`app/Madeira/SteamCloud.swift`, `SteamOwnedLibrary.swift` at 65e6fe8f) with the stricter rules
+`App/Sources/UI/SteamCloudView.swift` (the game's Steam Cloud section). Ported from DanPort
+(`app/DanPort/SteamCloud.swift`, `SteamOwnedLibrary.swift` at 65e6fe8f) with the stricter rules
 below. Log tag `[steam-cloud]`: App IDs, counts and results; no account data, paths or file names.
 
 ## When it runs
@@ -104,7 +104,7 @@ file list; the backups with **Restore…**. Restore puts a backup's files back w
 them (this device's current copies are backed up first, so a restore can be undone); the usual
 sync follows, which uploads the restored saves unless the cloud changed meanwhile (then you choose).
 
-## With Steam (Madeira Dock)
+## With Steam (DanPort Dock)
 
 Valve's own client inside the Wine session syncs Steam Cloud itself when it starts a game and when
 the game ends (its `logs/cloud_log.txt` goes into PocketGamesNoJ's log after a Dock session). PocketGamesNoJ
