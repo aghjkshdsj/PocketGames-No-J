@@ -21,3 +21,4 @@ engine/dxmt/danport/
 engine/dxmt/out/
 __pycache__/
 *.pyc
+App/Resources/Legal/build-info.json

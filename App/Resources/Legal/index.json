@@ -1,0 +1,235 @@
+{
+  "documents": [
+    {
+      "id": "PocketGames-GPL-3.0",
+      "title": "PocketGames — GNU GPL version 3",
+      "file": "PocketGames-GPL-3.0.txt",
+      "sha256": "e6037104443f9a7829b2aa7c5370d0789a7bda3ca65a0b904cdc0c2e285d9195",
+      "sourceURL": "https://github.com/aghjkshdsj/PocketGames-No-J"
+    },
+    {
+      "id": "PocketGames-Exception",
+      "title": "PocketGames — additional permission",
+      "file": "PocketGames-Exception.txt",
+      "sha256": "068be7f23176782fa0cc215bdcfa50d5db8796445ea7a6009f22112e25eab758",
+      "sourceURL": "https://github.com/aghjkshdsj/PocketGames-No-J"
+    },
+    {
+      "id": "Port-Exception",
+      "title": "Port — additional permission and scope",
+      "file": "Port-Exception.txt",
+      "sha256": "88f5122e6fbacb258235b7188f96c43c4514993aa8636adea803c82d1df2b32a",
+      "sourceURL": "https://github.com/aghjkshdsj/PocketGames-No-J"
+    },
+    {
+      "id": "Third-Party-Notices",
+      "title": "Components, credits and corresponding source",
+      "file": "Third-Party-Notices.txt",
+      "sha256": "62e6820163dbf9a0e4aec9b54271930605792041cd0dfbb0b19e7f504461ff7b",
+      "sourceURL": "https://github.com/aghjkshdsj/PocketGames-No-J"
+    },
+    {
+      "id": "Upstream-04-Wine",
+      "title": "Wine — copyright and license",
+      "file": "Upstream-04-Wine.txt",
+      "sha256": "ae025f125a5d639f0f7abe5146efa1e3d7453cc10b744b2910806fa3f46626ef",
+      "sourceURL": "https://api.github.com/repositories/1177551732/git/blobs/3909c6e050cd238630e2bb9baa7de3ea199bf61e"
+    },
+    {
+      "id": "Upstream-05-Wine",
+      "title": "Wine — authors",
+      "file": "Upstream-05-Wine.txt",
+      "sha256": "8ebc7a8f9772186f7586f95dbffc28430e33bec74086f2cdcd4e11ce0e290197",
+      "sourceURL": "https://api.github.com/repositories/1177551732/git/blobs/b1eedd7c55e801906e21e34da104f83489b8ef0d"
+    },
+    {
+      "id": "Upstream-06-Wine-fork",
+      "title": "Wine fork — licensing and contribution notices",
+      "file": "Upstream-06-Wine-fork.txt",
+      "sha256": "b9852a7a9642564f400bd11ad4fef4cb13dc89c803586e3f5d33d757484a27b7",
+      "sourceURL": "https://api.github.com/repositories/1177551732/git/blobs/fd2bc64a9a21678b0a9bb19ec2a7ae1c67af29d8"
+    },
+    {
+      "id": "Upstream-07-GNU-LGPL-version-2.1",
+      "title": "GNU LGPL version 2.1",
+      "file": "Upstream-07-GNU-LGPL-version-2.1.txt",
+      "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/732811e4f1faf71870b7350f211b26e00d7bfbe9"
+    },
+    {
+      "id": "Upstream-08-GNU-LGPL-version-3",
+      "title": "GNU LGPL version 3",
+      "file": "Upstream-08-GNU-LGPL-version-3.txt",
+      "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/fc8a5de7edf437cdc98a216370faf7c757279bcb"
+    },
+    {
+      "id": "Upstream-09-DXMT",
+      "title": "DXMT — MIT license",
+      "file": "Upstream-09-DXMT.txt",
+      "sha256": "6b928413c6308c106f3e0080bd94b6427b56d587d400fd40e6cbfbab7d9c4ae1",
+      "sourceURL": "https://api.github.com/repositories/1219644501/git/blobs/41dd6778e00185dffc2c66a13a541c9faa1ae93c"
+    },
+    {
+      "id": "Upstream-10-DXMT-fork",
+      "title": "DXMT fork — licensing and D3D9 notices",
+      "file": "Upstream-10-DXMT-fork.txt",
+      "sha256": "b8ec279e3c55f0de7da5046c058f44b3bda313247b2f925b1e54d1c925db6c8d",
+      "sourceURL": "https://api.github.com/repositories/1219644501/git/blobs/110fe58bc99d3276c8fd0e99aa24780a82050788"
+    },
+    {
+      "id": "Upstream-11-FEX",
+      "title": "FEX — reused interface code, MIT license",
+      "file": "Upstream-11-FEX.txt",
+      "sha256": "f34a779f56b36d22b20e1b990d23e583a6a7ca071331925fa46156441c77a1ee",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/cdb4f90b34cd30c0e0fd88108481c1fe61f66e57"
+    },
+    {
+      "id": "Upstream-12-Blink-interpreter",
+      "title": "Blink interpreter — ISC license",
+      "file": "Upstream-12-Blink-interpreter.txt",
+      "sha256": "033bd16010e133a62454e26853ed6a8f5fad39bf07e70e133eadbe6ccadfb2a7",
+      "sourceURL": "https://api.github.com/repositories/561183031/git/blobs/421b40f5cffc6e4f52b18f1dfa100218a882dc35"
+    },
+    {
+      "id": "Upstream-13-libxml2",
+      "title": "libxml2 — MIT license",
+      "file": "Upstream-13-libxml2.txt",
+      "sha256": "c5c63674f8a83c4d2e385d96d1c670a03cb871ba2927755467017317878574bd",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/d61318502caf9587516dd9a2cb637ad9c4877f69"
+    },
+    {
+      "id": "Upstream-14-libxslt",
+      "title": "libxslt — MIT license",
+      "file": "Upstream-14-libxslt.txt",
+      "sha256": "7e48e290b6bfccc2ec1b297023a1d77f2fd87417f71fbb9f50aabef40a851819",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/627eeff982f41b08a90a0ae6d30c16a193e44cef"
+    },
+    {
+      "id": "Upstream-15-NVAPI-headers",
+      "title": "NVAPI headers — MIT license",
+      "file": "Upstream-15-NVAPI-headers.txt",
+      "sha256": "bab44777f0f4d0333479ea0be6e24c084464a8cb64b98f1253fcc3df70f6eccf",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/1523a830be69c95382ba63c71c050ee2b770fe78"
+    },
+    {
+      "id": "Upstream-16-Zstandard-decoder",
+      "title": "Zstandard decoder — BSD license",
+      "file": "Upstream-16-Zstandard-decoder.txt",
+      "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/75800288cc243f164b9d130f125e2ffae28f8e39"
+    },
+    {
+      "id": "Upstream-17-fmt",
+      "title": "fmt — MIT license",
+      "file": "Upstream-17-fmt.txt",
+      "sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/1cd1ef92696b65b2ecb0e560e622f0a0e869dcf3"
+    },
+    {
+      "id": "Upstream-18-LLVM",
+      "title": "LLVM — Apache 2.0 with LLVM exceptions",
+      "file": "Upstream-18-LLVM.txt",
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/e159d283443f92ac78b964d2bccebe8f95d5d445"
+    },
+    {
+      "id": "Upstream-19-Apple-Metal-Shader-Converter",
+      "title": "Apple Metal Shader Converter — agreement",
+      "file": "Upstream-19-Apple-Metal-Shader-Converter.txt",
+      "sha256": "f3c681e55d6f8f39b5b47fa124e16946697f4d7963d60b3e004472ae92d6326e",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/73268e47c38e53725c66e5adc8c6e501afb45806"
+    },
+    {
+      "id": "Upstream-20-Apple-shader-converter-headers",
+      "title": "Apple shader converter headers — license",
+      "file": "Upstream-20-Apple-shader-converter-headers.txt",
+      "sha256": "60911e90d17eb7373139890425e6d0f93f43bfe5c81b91eed71841c175436e94",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/408ab67a27536f90c47fbaeed7556b1d920caeb4"
+    },
+    {
+      "id": "Upstream-21-Apple-shader-converter",
+      "title": "Apple shader converter — distribution notice",
+      "file": "Upstream-21-Apple-shader-converter.txt",
+      "sha256": "11a0eed499877499aaebcba8f3409ed20a216c6a92febb6329b1b2077f5b6505",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/3927d91e0490cd088187901c27a613f605fc084c"
+    },
+    {
+      "id": "Upstream-22-FreeType-2.13.3",
+      "title": "FreeType 2.13.3 — license selection",
+      "file": "Upstream-22-FreeType-2.13.3.txt",
+      "sha256": "2e3bbb7d7c5c396368dd0853a790ec29ce5b8647163dde42a0493fb0d6556b2b",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/8b9ce9e2e6e32e71b2a3f4ec4a0c1308f1811083"
+    },
+    {
+      "id": "Upstream-23-FreeType",
+      "title": "FreeType — project license",
+      "file": "Upstream-23-FreeType.txt",
+      "sha256": "08c135755dd589039470f1fdbb400daaabaaa50d0b366d19cebff4d22986baa1",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/c406d150fa57aaf7a5b950b6cf302daeba1d0bb9"
+    },
+    {
+      "id": "Upstream-24-FreeType",
+      "title": "FreeType — alternative GPL version 2 terms",
+      "file": "Upstream-24-FreeType.txt",
+      "sha256": "c4120c6752c910c299e3bd9cb3a46ff262c268303ca2069b61f92f10a5656c18",
+      "sourceURL": "https://api.github.com/repos/freetype/freetype/git/blobs/b2fe7b6af3535ebc1e018dd2fe6c993330c031fa"
+    },
+    {
+      "id": "Upstream-25-FFmpeg-7.1.1",
+      "title": "FFmpeg 7.1.1 — licensing and configuration",
+      "file": "Upstream-25-FFmpeg-7.1.1.txt",
+      "sha256": "cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/9547622e7843d980d9381dd1b1d3e0d2ee118290"
+    },
+    {
+      "id": "Upstream-26-GMP-6.3.0",
+      "title": "GMP 6.3.0 — authors",
+      "file": "Upstream-26-GMP-6.3.0.txt",
+      "sha256": "da5870e2f0482c5dc15b4cfed8bbfb51ce1279c8f8fc52bdb8c13c7cee949c32",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/eed1334cca024677702c3a4de194758cb1b15c36"
+    },
+    {
+      "id": "Upstream-27-Nettle---Hogweed-3.10.1",
+      "title": "Nettle / Hogweed 3.10.1 — authors",
+      "file": "Upstream-27-Nettle---Hogweed-3.10.1.txt",
+      "sha256": "6fd91e60caa0c33dd22888b710fcfa36532bbbef00d85c78de385dcd97f7b9ee",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/8bd78468dd44ca5ad07a0d1b32dd51bd56915be4"
+    },
+    {
+      "id": "Upstream-28-GnuTLS-3.8.9",
+      "title": "GnuTLS 3.8.9 — authors",
+      "file": "Upstream-28-GnuTLS-3.8.9.txt",
+      "sha256": "bd3409092ad8832d2c7b2983d5f2cb4d8ca2daf58d7da5efa8859b09cdeef47e",
+      "sourceURL": "https://api.github.com/repositories/1175417517/git/blobs/ef13794d4071a6de541d1d3fbeef63c256be2711"
+    },
+    {
+      "id": "Dock-MinGW-w64-runtime",
+      "title": "MinGW-w64 runtime — notices",
+      "file": "Dock-MinGW-w64-runtime.txt",
+      "sha256": "6f8707c004133080b2e11da8caefd1d71531b7423ae9c9e3d6043801d24bf5b2",
+      "sourceURL": "https://api.github.com/repositories/1393407380/commits/e00078410845eb41d2618edd5e3ff0879a4c0735"
+    },
+    {
+      "id": "Dock-LLVM",
+      "title": "Dock LLVM runtime — notices",
+      "file": "Dock-LLVM.txt",
+      "sha256": "a9ed3eae930adbc631b83300b78ab5d228c9b1e4560d64ec4b4ea2bcf69f4569",
+      "sourceURL": "https://api.github.com/repositories/1393407380/commits/e00078410845eb41d2618edd5e3ff0879a4c0735"
+    },
+    {
+      "id": "Dock-LICENSE",
+      "title": "Dock — copyright and license",
+      "file": "Dock-LICENSE.txt",
+      "sha256": "573e83208bb72d9abf8d77112977a19390db5c4d77bb184930a278068b635c06",
+      "sourceURL": "https://api.github.com/repos/willfaust/madeira-dock/git/blobs/0be5f48f174621fcc12e1ca71edd94321035fa12"
+    },
+    {
+      "id": "Dock-LICENSE-EXCEPTION",
+      "title": "Dock — additional permission",
+      "file": "Dock-LICENSE-EXCEPTION.txt",
+      "sha256": "534f059c2e9fe5de1acde82b920651b77ea3b4253f86837a3d6a81f54a5bdbbc",
+      "sourceURL": "https://api.github.com/repos/willfaust/madeira-dock/git/blobs/5eac352c3149ce0cf7e643192cdc3423f9290ae6"
+    }
+  ]
+}

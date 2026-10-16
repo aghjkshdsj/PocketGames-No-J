@@ -47,7 +47,7 @@ def normalize(root, original):
         directories[:] = [name for name in directories if name not in excluded]
         for name in names:
             path = Path(base) / name
-            if name in (".git", ".gitmodules") or path.is_symlink():
+            if name in (".git", ".gitmodules") or path.is_symlink() or name.upper().startswith(("LICENSE", "COPYING", "NOTICE", "THIRD-PARTY-NOTICES", "METAL-SHADER-CONVERTER-AGREEMENT")):
                 continue
             files.append(path)
     for path in files:

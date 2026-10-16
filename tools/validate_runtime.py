@@ -8,6 +8,9 @@ import plistlib
 import re
 import tarfile
 from port_source import metadata, PORT_ID
+from prepare_licenses import validate_app
+from prepare_licenses import digest, ROOT, LEGAL
+import json
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("app", type=Path)
@@ -27,6 +30,8 @@ for relative in required:
     assert path.is_file() and path.stat().st_size, f"Required game runtime missing: {relative}"
 info = plistlib.loads((app / "Info.plist").read_bytes())
 assert info["CFBundleDisplayName"] == "PocketGames No J", "Unexpected app display name"
+validate_app(app)
+legal_hashes = {d['sha256'] for d in json.loads((ROOT / LEGAL / 'index.json').read_text(encoding='utf-8'))['documents']}
 name = metadata(PORT_ID)["name"]
 patterns = [re.compile(re.escape(name.encode()), re.I)]
 patterns += [re.compile(re.escape(value.encode(encoding))) for encoding in ("utf-16-le", "utf-16-be")
@@ -41,6 +46,10 @@ for path in app.rglob("*"):
     if not path.is_file():
         continue
     data = path.read_bytes()
+    # Legal notices preserve their original names/wording; their exact contents
+    # are verified against the checked-in license manifest above.
+    if relative.startswith("Legal/") or (relative.startswith("d3d12/") and digest(data) in legal_hashes):
+        continue
     check(data, relative)
     if path.name.endswith(".tar.gz"):
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:

@@ -39,6 +39,15 @@ class NamespaceTests(unittest.TestCase):
             port.normalize(root, "OldPort")
             self.assertEqual((root / ".git/config").read_text(), "OldPort")
 
+    def test_legal_wording_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('LICENSE.txt', 'NOTICE.txt', 'COPYING', 'THIRD-PARTY-NOTICES.md'):
+                (root / name).write_text('Original OldPort copyright and license')
+            port.normalize(root, 'OldPort')
+            for name in ('LICENSE.txt', 'NOTICE.txt', 'COPYING', 'THIRD-PARTY-NOTICES.md'):
+                self.assertEqual((root / name).read_text(), 'Original OldPort copyright and license')
+
 
 if __name__ == "__main__":
     unittest.main()

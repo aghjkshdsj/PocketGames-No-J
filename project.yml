@@ -68,6 +68,9 @@ targets:
         buildPhase: resources
         optional: true
       - path: App/Assets.xcassets
+      - path: App/Resources/Legal
+        type: folder
+        buildPhase: resources
       - path: App/Info.plist
         buildPhase: none
       - path: App/PocketGamesNoJ.entitlements

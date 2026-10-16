@@ -3,3 +3,11 @@
 *.py text eol=lf
 *.yml text eol=lf
 *.patch text eol=lf
+
+# Preserve the exact upstream license bytes and manifest hashes on all hosts.
+App/Resources/Legal/*.txt -text
+App/Resources/Legal/*.json text eol=lf
+LICENSE -text
+LICENSE-EXCEPTION.md -text
+LICENSES/* -text
+THIRD-PARTY-NOTICES.md -text

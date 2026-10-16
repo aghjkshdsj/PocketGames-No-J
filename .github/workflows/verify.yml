@@ -26,6 +26,8 @@ jobs:
       - name: Generate project
         run: |
           mkdir -p App/Generated/PE
+          python3 tools/prepare_licenses.py --check
+          python3 tools/prepare_licenses.py
           brew install xcodegen
           if [ "${{ github.event_name }}" != workflow_dispatch ] || [ "${{ inputs.fast_compile }}" = true ]; then
             python3 - <<'PY'
@@ -61,3 +63,5 @@ jobs:
         run: bash tests/host/run.sh "$RUNNER_TEMP/tests"
       - name: Dependency namespace checks
         run: python3 tests/port_source_test.py
+      - name: Legal bundle checks
+        run: python3 tests/legal_bundle_test.py

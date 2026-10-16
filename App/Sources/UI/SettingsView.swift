@@ -360,10 +360,11 @@ private struct AboutSettings: View {
             DeckCard(title: "PocketGames No J", icon: "info.circle") {
                 Text("Version \(info?["CFBundleShortVersionString"] as? String ?? "?") (build \(info?["CFBundleVersion"] as? String ?? "?"))")
                 Text("Interpreter (Blink): \(engine.interpVersion)").font(.footnote.monospaced()).foregroundStyle(Deck.dim)
-                Text("PocketGames No J by Dan. GPL-3.0-or-later. Uses Wine, DXMT and interpreter engines. See the source repository for license notices.")
+                Text("PocketGames No J, maintained by Dan. GPL-3.0-or-later with additional permission. Includes third-party software under its own licenses.")
                     .font(.footnote).foregroundStyle(Deck.dim)
             }
             GlassCard {
+                navRow("Open Source Licenses", detail: "Copyright notices, license texts and source code", icon: "doc.text") { ui.open(.licenses) }
                 navRow("Logs", detail: "Share pocketgamesnoj-log.txt when something goes wrong", icon: "text.alignleft") { ui.open(.logs) }
                 navRow("Benchmarks", detail: "CPU, GPU and interpreter tests", icon: "speedometer") { ui.open(.benchmarks) }
                 navRow("Test programs", detail: "Built-in x86-64 and Windows programs", icon: "terminal", last: true) { ui.open(.developer) }

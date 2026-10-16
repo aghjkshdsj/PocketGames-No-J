@@ -50,6 +50,8 @@ private struct RouteView: View {
         case .logs: GlassPage(back: "Settings", title: "Logs", scrolls: false) { LogView() }
         case .benchmarks: GlassPage(back: "Settings", title: "Benchmarks", scrolls: false) { PerformanceView() }
         case .developer: GlassPage(back: "About", title: "Test programs") { DeveloperView() }
+        case .licenses: GlassPage(back: "About", title: "Open Source Licenses") { LegalNoticesView() }
+        case .licenseDocument(let id): GlassPage(back: "Licenses", title: "License Notice") { LegalDocumentView(documentID: id) }
         }
     }
 }

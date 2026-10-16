@@ -136,6 +136,8 @@ final class UIState: ObservableObject {
         case logs
         case benchmarks
         case developer
+        case licenses
+        case licenseDocument(String)
     }
 
     @Published var tab: Tab = .home
