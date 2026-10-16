@@ -13,6 +13,28 @@ spec.loader.exec_module(legal)
 
 
 class LegalBundleTests(unittest.TestCase):
+    def test_generated_dock_notice_retains_all_original_notices(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(ROOT / legal.LEGAL, root / legal.LEGAL)
+            for source in legal.COPIES.values():
+                target = root / source
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / source, target)
+            dock = root / 'App/Generated/pedylib/winepe/dock-notices.txt'
+            dock.parent.mkdir(parents=True)
+            data = b'\n\n'.join((root / legal.LEGAL / name).read_bytes() for name in (
+                'Dock-LICENSE.txt', 'Dock-LICENSE-EXCEPTION.txt', 'Dock-MinGW-w64-runtime.txt', 'Dock-LLVM.txt'))
+            dock.write_bytes(data)
+            import os
+            from unittest.mock import patch
+            with patch.dict(os.environ, {'GITHUB_SHA':'a' * 40}):
+                legal.prepare(root=root)
+                self.assertEqual((root / legal.LEGAL / 'Dock-Combined-Notices.txt').read_bytes(), data)
+                dock.write_bytes(b'Truncated notices')
+                with self.assertRaises(AssertionError):
+                    legal.prepare(root=root)
+
     def test_checked_in_notices_match_originals(self):
         legal.prepare(check=True)
 

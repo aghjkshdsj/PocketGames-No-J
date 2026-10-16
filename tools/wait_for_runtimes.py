@@ -7,7 +7,7 @@ import time
 
 workflows = ['wine-unix.yml', 'wine-i386.yml', 'dxmt.yml', 'dxmt-pe.yml']
 repository = os.environ['GITHUB_REPOSITORY']
-revision = os.environ['GITHUB_SHA']
+revision = os.environ.get('RUNTIME_SOURCE_SHA') or os.environ['GITHUB_SHA']
 deadline = time.monotonic() + 85 * 60
 pending = set(workflows)
 while pending:

@@ -22,3 +22,4 @@ engine/dxmt/out/
 __pycache__/
 *.pyc
 App/Resources/Legal/build-info.json
+App/Resources/Legal/Dock-Combined-Notices.txt

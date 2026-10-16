@@ -48,7 +48,7 @@ for path in app.rglob("*"):
     data = path.read_bytes()
     # Legal notices preserve their original names/wording; their exact contents
     # are verified against the checked-in license manifest above.
-    if relative.startswith("Legal/") or (relative.startswith("d3d12/") and digest(data) in legal_hashes):
+    if relative.startswith("Legal/") or relative == "arm64ec-windows/dock-notices.txt" or (relative.startswith("d3d12/") and digest(data) in legal_hashes):
         continue
     check(data, relative)
     if path.name.endswith(".tar.gz"):

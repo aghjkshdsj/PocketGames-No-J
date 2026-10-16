@@ -6,9 +6,10 @@
 # main's IPA, and main never picks up a side branch's libraries.
 set -euo pipefail
 wf="${1:?workflow file}"
+runtime_sha="${RUNTIME_SOURCE_SHA:-$GITHUB_SHA}"
 for br in "${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}" main; do
     run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$wf" --branch "$br" --status success --limit 20 \
-        --json databaseId,headSha --jq ".[] | select(.headSha == \"$GITHUB_SHA\") | .databaseId" 2>/dev/null | head -1 || true)
+        --json databaseId,headSha --jq ".[] | select(.headSha == \"$runtime_sha\") | .databaseId" 2>/dev/null | head -1 || true)
     if [ -n "$run" ]; then
         echo "$wf: run $run ($br)" >&2
         echo "$run"

@@ -52,6 +52,21 @@ def prepare(root=ROOT, check=False):
             else:
                 target.write_bytes(original)
                 doc['sha256'] = digest(original)
+    # The full IPA also ships the dock's generated combined notice beside its
+    # executable. Make it readable in the app and verify its original notices
+    # survived staging; a light verification build has no dock executable.
+    dock = root / 'App/Generated/pedylib/winepe/dock-notices.txt'
+    if dock.is_file() and not check:
+        data = dock.read_bytes()
+        for name in ('Dock-LICENSE.txt', 'Dock-LICENSE-EXCEPTION.txt', 'Dock-MinGW-w64-runtime.txt', 'Dock-LLVM.txt'):
+            assert (folder / name).read_bytes() in data, f'Dock attribution changed: {name}'
+        (folder / 'Dock-Combined-Notices.txt').write_bytes(data)
+        index['documents'] = [d for d in index['documents'] if d['id'] != 'Dock-Combined-Notices']
+        index['documents'].append({
+            'id':'Dock-Combined-Notices', 'title':'Dock — complete shipped notices',
+            'file':'Dock-Combined-Notices.txt', 'sha256':digest(data),
+            'sourceURL':f'{REPOSITORY}/tree/{os.environ.get("GITHUB_SHA", "main")}/engine/pedylib',
+        })
     if not check:
         (folder / 'index.json').write_text(json.dumps(index, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         revision = os.environ.get('GITHUB_SHA') or subprocess.check_output(
@@ -66,6 +81,10 @@ def prepare(root=ROOT, check=False):
 def validate_app(app, root=ROOT):
     expected = validate(root / LEGAL)
     validate(app / 'Legal', expected)
+    dock = app / 'arm64ec-windows/dock-notices.txt'
+    if (app / 'arm64ec-windows/dockhost.exe').exists():
+        assert dock.is_file(), 'Dock copyright notices are missing'
+        assert dock.read_bytes() == (app / 'Legal/Dock-Combined-Notices.txt').read_bytes(), 'Dock notices differ from legal bundle'
     info = json.loads((app / 'Legal/build-info.json').read_text(encoding='utf-8'))
     assert re.fullmatch('[0-9a-f]{40}', info['revision']), 'Invalid bundled source revision'
     assert info['sourceURL'] == f'{REPOSITORY}/tree/{info["revision"]}', 'Incorrect corresponding-source link'
