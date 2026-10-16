@@ -2,12 +2,19 @@ name: Verify project
 on:
   push:
     branches: [main]
+    paths-ignore: [".github/workflows/**", "docs/**", "*.md"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      compile_app:
+        description: Compile the iOS app as well as running host tests
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
   app:
+    if: github.event_name != 'workflow_dispatch' || inputs.compile_app
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -21,10 +28,20 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project PocketGamesNoJ.xcodeproj -scheme PocketGamesNoJ -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log
-      - name: Host tests
-        run: bash tests/host/run.sh "$RUNNER_TEMP/tests"
       - uses: actions/upload-artifact@v5
         if: failure()
         with:
           name: verification-log
           path: build.log
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Swift toolchain
+        run: |
+          if ! command -v swiftc > /dev/null; then
+            curl -fsSL https://download.swift.org/swift-6.0.3-release/ubuntu2404/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-ubuntu24.04.tar.gz | tar -xz -C "$RUNNER_TEMP"
+            echo "$RUNNER_TEMP/swift-6.0.3-RELEASE-ubuntu24.04/usr/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Host tests on a case-sensitive filesystem
+        run: bash tests/host/run.sh "$RUNNER_TEMP/tests"
