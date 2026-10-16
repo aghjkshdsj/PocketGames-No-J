@@ -5,6 +5,13 @@ delivered gameplay baseline: the user reported Forager running at a stable
 60 FPS on iPhone 15 Pro Max, iOS 27.0.1, installed with iLoader. That result does
 not establish performance of this branch or other games.
 
+Build 9 at `396493dbf31cc1f3f3625a8e64ba4950b1ac8832` subsequently passed the
+complete IPA and modified-GnuTLS relink checks. The user confirmed Forager still
+works with that candidate; the supplied device log includes successful 32-bit
+window reservation and rendering with sampled frame gaps around 16.7 ms.
+Steam testing remains pending. The supplied red controller artwork is now the
+app icon for subsequent packages; it does not change the already-built IPA.
+
 ## Implemented here
 
 - Settings → About → Privacy opens an offline policy describing local storage,
