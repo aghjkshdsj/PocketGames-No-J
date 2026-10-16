@@ -108,10 +108,19 @@ final class GameLauncher: ObservableObject {
         RecentlyPlayed.shared.note(RecentlyPlayed.custom(game.id))
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(600))   // let the alert finish closing
-            session.title = game.name
-            session.gameID = RecentlyPlayed.custom(game.id)
-            session.shown = true
+            showGameIfActive(title: game.name, gameID: RecentlyPlayed.custom(game.id))
         }
+    }
+
+    /// Startup can fail while the launch alert closes. Do not reopen a failed
+    /// or finished game's surface, or replace another game's active surface.
+    private func showGameIfActive(title: String, gameID: String) {
+        guard wine.sessionGameKey == gameID else { return }
+        if case .failed(let why) = wine.state { playError = why; return }
+        guard wine.isPlaying else { return }
+        session.title = title
+        session.gameID = gameID
+        session.shown = true
     }
 
     /// Play: with Steam (Steam Dock) or without, as Settings › Steam says, or asked each time.
@@ -157,9 +166,7 @@ final class GameLauncher: ObservableObject {
                 SteamCloudSync.shared.gameStarting(game.id, synced: !skipCloud, dock: dock)
                 RecentlyPlayed.shared.note(RecentlyPlayed.steam(game.id))
                 try? await Task.sleep(for: .milliseconds(600))
-                session.title = game.name
-                session.gameID = RecentlyPlayed.steam(game.id)
-                session.shown = true
+                showGameIfActive(title: game.name, gameID: RecentlyPlayed.steam(game.id))
             } catch {
                 playError = error.localizedDescription
             }
