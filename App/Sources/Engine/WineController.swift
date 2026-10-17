@@ -4,8 +4,8 @@ import GameController
 import UIKit
 import os
 
-/// Runs Windows programs through Wine and the built-in interpreters. One Wine session per app run; with session reuse
-/// (Settings, docs/SESSION_REUSE.md) later games start in that session.
+/// Runs Windows programs through Wine and the built-in interpreters. Games share one Wine
+/// session per app run, so Quit game keeps PocketGames open (docs/SESSION_REUSE.md).
 final class WineController: ObservableObject, @unchecked Sendable {
     enum State: Equatable { case idle, booting(String), running(String), finished(String, String), failed(String) }
 
@@ -154,10 +154,6 @@ final class WineController: ObservableObject, @unchecked Sendable {
 
     // ---- Session reuse (docs/SESSION_REUSE.md) ----
 
-    /// Settings › Interpreter › Play another game without restarting (experimental): when a game
-    /// ends, its Wine session stays, and the next game starts in it as a new Windows process.
-    static var reuseEnabled: Bool { UserDefaults.standard.bool(forKey: "sessionReuse") }
-
     /// What Wine sets up once, for the session's first program: a later game can start in the
     /// session only when it needs the same.
     struct SessionKind: Equatable {
@@ -202,11 +198,8 @@ final class WineController: ObservableObject, @unchecked Sendable {
             return String(cString: startupError)
         }
         let restart = "To play another, swipe PocketGames No J away in the app switcher and open it again."
-        guard Self.reuseEnabled else {
-            return "PocketGames No J runs one Windows game per launch. \(restart) (Settings › Interpreter › Play another game without restarting lets the next game start without that.)"
-        }
         guard let session = sessionKind, session.interpreted, sessionKept else {
-            return "This Wine session was not kept for another game. Enable Play another game without restarting before launching a game. \(restart)"
+            return "This Wine session was not kept for another game. \(restart)"
         }
         guard mid_wine_session_reusable() != 0 else {
             return "The last game's Wine session is no longer running. \(restart)"
@@ -381,7 +374,9 @@ final class WineController: ObservableObject, @unchecked Sendable {
         forceQuitAsked.withLock { $0 = false }
         // The bridge keeps the wineserver when this program ends (WineProcessBridge.m as patched by
         // engine/wine/patches/session_reuse.py), so the next game can start in the session.
-        let keep = interpreterSession && Self.reuseEnabled
+        // No-JIT games must keep the session: tearing down the in-process wineserver prevents
+        // both Quit game and a second launch. Ignore the old opt-in preference, including false.
+        let keep = interpreterSession
         if keep { setenv("PocketGamesNoJ_SESSION_REUSE", "1", 1) } else { unsetenv("PocketGamesNoJ_SESSION_REUSE") }
         // Interpreted: Wine maps its DLLs from the signed dylibs and loads the stub x64 emulator.
         if true {

@@ -16,10 +16,14 @@ python3 "$ROOT/tests/wow_window_bounds_test.py"
 python3 "$ROOT/tests/compliance_tools_test.py"
 python3 "$ROOT/tests/app_store_preparation_test.py"
 python3 "$ROOT/tests/runtime_frameworks_test.py"
+python3 "$ROOT/tests/latest_run_test.py"
 cc -std=c11 -Wall -Wextra -Werror -I"$ROOT/engine/pedylib" \
     "$HERE/runtime_frameworks/main.c" -o "$OUT/runtime-framework-tests"
 "$OUT/runtime-framework-tests"
 swiftc --version | head -1
+# Quit game waits for the native end; confirmation and timeout callbacks cannot kill a later game.
+swiftc -O -o "$OUT/game-quit-tests" "$ROOT/App/Sources/Engine/GameQuitCore.swift" "$HERE/game_quit/main.swift"
+"$OUT/game-quit-tests" | tee "$OUT/game-quit-tests.txt"
 # Sign-in status polling survives app-switch connection loss without replaying
 # credentials or ignoring cancellation / the original session deadline.
 swiftc -parse-as-library -O -o "$OUT/steam-auth-tests" "$ROOT/App/Sources/Steam/SwiftSteam/Auth/SteamAuthNetwork.swift" "$HERE/steam_auth/main.swift"

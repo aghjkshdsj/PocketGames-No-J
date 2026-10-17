@@ -14,9 +14,10 @@ struct GameSessionHost: ViewModifier {
     @State private var showTouchMenu = false
     @State private var showPadMenu = false
     @State private var openingSubmenu = false   // the game menu closes before a submenu opens
-    @State private var quitStuck = false        // Quit game did not end the game: Force quit is offered
-    @State private var quitAttempt = 0          // the latest Quit game / Force quit (its watchdog's)
-    @State private var quitPending = false      // Quit game was asked and the game still runs
+    @State private var quit = GameQuitFlow()
+    @State private var showQuitConfirmation = false
+    @State private var showForceConfirmation = false
+    @State private var showCloseConfirmation = false
 
     func body(content: Content) -> some View {
         content
@@ -30,13 +31,16 @@ struct GameSessionHost: ViewModifier {
                 case .finished, .failed:
                     dlog("[ui] session ended: game view closed")
                     showGameMenu = false; showControllerMenu = false; showTouchMenu = false; showPadMenu = false
+                    showQuitConfirmation = false; showForceConfirmation = false; showCloseConfirmation = false
+                    openingSubmenu = false
+                    GameHostView.shared.isHidden = true
                     session.shown = false
                     session.title = ""
+                    session.gameID = ""
                     GameHostView.shared.setStatus(nil)   // Quit game's "Closing…"
+                    GameInput.shared.releaseAll("game ended")
                     TouchPadOverlay.shared.sessionEnded()
-                    quitStuck = false
-                    quitPending = false
-                    quitAttempt += 1
+                    if quit.sessionEnded() { UIState.shared.show(.library) }
                 default: break
                 }
             }
@@ -54,6 +58,7 @@ struct GameSessionHost: ViewModifier {
             .padScope("game")   // the app behind takes no focus while the game is up
             .onAppear {
                 GameHostView.onMenu = {
+                    guard session.shown, wine.isPlaying else { return }
                     dlog("[ui] game menu opening (surface shown \(session.shown), menu already open \(showGameMenu))")
                     // The menu is opened when something is wrong (a game that hangs while starting
                     // or quitting, build 162): where every thread of the 32-bit programs is, each time.
@@ -66,6 +71,20 @@ struct GameSessionHost: ViewModifier {
             .glassDialog(session.title, isPresented: $showGameMenu, message: gameMenuMessage) {
                 var b: [DialogButton] = [
                     DialogButton(title: "Resume"),
+                ]
+                if wine.sessionKept {
+                    if quit.canQuit {
+                        b.append(DialogButton(title: "Quit game (keep app open)") {
+                            submenu { showQuitConfirmation = true }
+                        })
+                    }
+                    if quit.canForce {
+                        b.append(DialogButton(title: "Force quit game…", role: .destructive) {
+                            submenu { showForceConfirmation = true }
+                        })
+                    }
+                }
+                b += [
                     DialogButton(title: "Controller: \(wine.padKeyboard ? "keyboard and mouse" : wine.padStyle.title)…") {
                         submenu { showControllerMenu = true }
                     },
@@ -77,12 +96,22 @@ struct GameSessionHost: ViewModifier {
                     },
                     DialogButton(title: "Hide game (keeps running)") { session.shown = false },
                 ]
-                if wine.sessionKept {
-                    b.append(DialogButton(title: "Quit game") { requestQuit() })
-                    if quitStuck { b.append(DialogButton(title: "Force quit", role: .destructive) { forceQuit() }) }
-                }
-                b.append(DialogButton(title: "Quit game and close PocketGamesNoJ", role: .destructive) { CrashReporter.shared.quitApp() })
+                b.append(DialogButton(title: "Quit game and close PocketGames No J…", role: .destructive) {
+                    submenu { showCloseConfirmation = true }
+                })
                 return b
+            }
+            .glassDialog("Quit \(session.title)?", isPresented: $showQuitConfirmation,
+                         message: "Save your progress first. This asks the game to close and keeps PocketGames open. If the game asks you to confirm, answer in the game. The library appears after the game exits.") {
+                [DialogButton(title: "Quit game", role: .destructive) { requestQuit() }, .cancel()]
+            }
+            .glassDialog("Force quit \(session.title)?", isPresented: $showForceConfirmation,
+                         message: "Ends the game's processes immediately. Unsaved progress will be lost. PocketGames stays open; Steam Cloud checks the saves already on disk after the game ends.") {
+                [DialogButton(title: "Force quit game", role: .destructive) { forceQuit() }, .cancel()]
+            }
+            .glassDialog("Close PocketGames No J?", isPresented: $showCloseConfirmation,
+                         message: "Stops the game and closes the app. Unsaved progress will be lost and Steam Cloud may not finish syncing.") {
+                [DialogButton(title: "Close app", role: .destructive) { CrashReporter.shared.quitApp() }, .cancel()]
             }
             .glassDialog("Controller", isPresented: $showControllerMenu, message: Self.controllerMessage(wine)) {
                 PadStyle.allCases.map { s in
@@ -124,6 +153,9 @@ struct GameSessionHost: ViewModifier {
             }
             .onChange(of: showControllerMenu) { _, open in closedSubmenu(open) }
             .onChange(of: showTouchMenu) { _, open in closedSubmenu(open) }
+            .onChange(of: showQuitConfirmation) { _, open in closedSubmenu(open) }
+            .onChange(of: showForceConfirmation) { _, open in closedSubmenu(open) }
+            .onChange(of: showCloseConfirmation) { _, open in closedSubmenu(open) }
             .onChange(of: showPadMenu) { _, open in
                 if open { openingSubmenu = false }
                 if !open, session.shown, !pad.editing {
@@ -142,17 +174,27 @@ struct GameSessionHost: ViewModifier {
     }
 
     private var gameMenuMessage: String {
-        if wine.sessionKept && quitStuck {
-            return "\(session.title) has not closed. Force quit ends it at once (unsaved progress is lost) and PocketGames No J stays open for the next game."
-        } else if wine.sessionKept {
-            return "Quit game asks the game to close, as its window's close button does: confirm in the game if it asks. A game still running 10 s later is force quit (unsaved progress is lost). PocketGames No J stays open for the next game. Quit game and close PocketGames No J stops it at once."
+        if wine.sessionKept {
+            switch quit.phase {
+            case .waiting, .needsForce:
+                return "Waiting for \(session.title) to close. Resume to answer any in-game confirmation, or choose Force quit if it is stuck. PocketGames stays open."
+            case .forcing:
+                return "Ending \(session.title)'s processes. The library appears when Wine reports that the game has ended."
+            case .forceFailed:
+                return "\(session.title) has not ended. You can retry Force quit, or close the app if it remains stuck."
+            case .idle:
+                return "Quit game closes the game and returns to the library so you can play another. Save first and confirm in the game if it asks. Hide game keeps it running."
+            }
         }
-        return "A Windows game can only be stopped by closing PocketGames No J; unsaved progress is lost."
+        return "The game is starting. Quit game becomes available when its Wine session is ready."
     }
 
     private func submenu(_ open: @escaping () -> Void) {
         openingSubmenu = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: open)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard openingSubmenu, session.shown, wine.isPlaying else { return }
+            open()
+        }
     }
 
     private func closedSubmenu(_ open: Bool) {
@@ -160,56 +202,37 @@ struct GameSessionHost: ViewModifier {
         if !open, session.shown { GameHostView.shared.isHidden = false }
     }
 
-    /// Quit game with session reuse: asks the game to close with Alt+F4 through its normal input,
-    /// as the upstream port’s Quit game does (Library.swift requestQuit), so it can save and run its own exit
-    /// dialog. Its view stays up until the session ends; the Wine session stays for the next game.
+    /// Ask the game to save/confirm and exit. Only Wine's completion opens the library and
+    /// triggers the existing Steam Cloud end-of-game sync; the timeout never kills the game.
     private func requestQuit() {
+        guard wine.sessionKept, wine.isPlaying, let attempt = quit.requestQuit() else { return }
         dlog("[ui] quit requested: Alt+F4 to \(session.title)")
-        mid_post_key(0x12, 1); mid_post_key(0x73, 1)   // VK_MENU, VK_F4
+        mid_post_key(0x12, 1); mid_post_key(0x73, 1)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { mid_post_key(0x73, 0); mid_post_key(0x12, 0) }
         GameHostView.shared.setStatus("Closing \(session.title)… confirm in the game if it asks")
-        let title = session.title
-        // Quit game again while the first is pending: the game is not closing. Say where its
-        // threads are now (build 161: the second press came before the first one's report, and
-        // the log was taken before either), and end it.
-        if quitPending {
-            dlog("[ui] Quit game again: \(title) is still running")
-            mid_wow_thread_report("Quit game again: \(title) still runs")
-            forceQuit()
-            return
-        }
-        // Still running 6 s later (a game can hang on its way out, or wait in a dialog): say where
-        // its threads are in the log, and force quit it 4 s after that unless it ends meanwhile.
-        quitPending = true
-        quitAttempt += 1
-        let attempt = quitAttempt
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-            guard attempt == quitAttempt, session.title == title, case .running = wine.state, !quitStuck else { return }
-            dlog("[ui] \(title) is still running 6 s after Quit game")
-            mid_wow_thread_report("\(title) still runs 6 s after Quit game")
-            quitStuck = true
-            GameHostView.shared.setStatus("\(title) has not closed: force quitting it in 4 s.")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                guard attempt == quitAttempt, session.title == title, case .running = wine.state else { return }
-                dlog("[ui] \(title) is still running 10 s after Quit game: force quit")
-                forceQuit()
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            guard wine.isPlaying, quit.quitTimedOut(attempt) else { return }
+            dlog("[ui] game still running after Quit game; waiting for the player")
+            mid_wow_thread_report("Quit game: still running")
+            GameHostView.shared.setStatus("Still running: confirm in the game, or open the menu for Force quit")
         }
     }
 
-    /// Force quit (kept sessions): the Wine server ends the game's processes as TerminateProcess
-    /// does; the session stays for the next game (docs/SESSION_REUSE.md).
+    /// The confirmed force action ends programs through the existing wineserver path; it
+    /// keeps system processes and waits for the native cleanup before offering another launch.
     private func forceQuit() {
+        guard wine.isPlaying, quit.canForce else { return }
         dlog("[ui] force quit requested for \(session.title)")
-        quitAttempt += 1
-        guard wine.forceQuit() else { quitStuck = false; return }
+        guard wine.forceQuit() else {
+            GameHostView.shared.setStatus("Force quit was not accepted. Open the game menu to retry.")
+            return
+        }
+        guard let attempt = quit.requestForce() else { return }
         GameHostView.shared.setStatus("Ending \(session.title)…")
-        let attempt = quitAttempt, title = session.title
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            guard attempt == quitAttempt, session.title == title, case .running = wine.state else { return }
-            dlog("[ui] \(title) is still running 8 s after Force quit")
-            mid_wow_thread_report("\(title) still runs 8 s after Force quit")
-            GameHostView.shared.setStatus("\(title) could not be ended. Quit game and close PocketGames No J stops it.")
+            guard wine.isPlaying, quit.forceTimedOut(attempt) else { return }
+            mid_wow_thread_report("Force quit: still running")
+            GameHostView.shared.setStatus("Game has not ended. Open the menu to retry Force quit or close the app.")
         }
     }
 
