@@ -89,7 +89,7 @@ step_dxmt() {
     local D="$M/build/dxmt-ios"
     python3 "$ROOT/tools/port_source.py" file "$M/danport-d3d12/src/unix/danport_ir_unix.mm" \
         --repository-id "$DANPORT_REPOSITORY_ID" --ref "$DANPORT_SHA" \
-        --source-path '{port}-d3d12/src/unix/{port}_ir_unix.mm'
+        --source-path '{port_lower}-d3d12/src/unix/{port_lower}_ir_unix.mm'
     python3 "$ROOT/tools/port_source.py" normalize "$M"
     python3 "$HERE/patches/converter_framework.py" "$M"
     # An ended 32-bit game's Metal textures and buffers go with its window (patches/metal_owner.py,
