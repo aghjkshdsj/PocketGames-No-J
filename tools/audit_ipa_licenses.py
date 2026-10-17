@@ -84,7 +84,10 @@ def audit(ipa, original=None):
         app = z.read(PREFIX + 'PocketGamesNoJ')
         _, symbols = macho(app)
         ijg = sorted(s for s in symbols if re.search(r'ff_jpeg_fdct|ff_j_rev_dct', s))
-        converter = z.read(PREFIX + 'd3d12/libmetalirconverter.dylib')
+        converter_path = ('Frameworks/PGShaderConverter.framework/PGShaderConverter'
+                          if PREFIX + 'RuntimeFrameworks.json' in z.namelist()
+                          else 'd3d12/libmetalirconverter.dylib')
+        converter = z.read(PREFIX + converter_path)
         sections, _ = macho(converter)
         result = {
             'ipa': str(ipa.resolve()), 'ipa_sha256': hashlib.sha256(ipa.read_bytes()).hexdigest(),
@@ -95,6 +98,7 @@ def audit(ipa, original=None):
             'symbol_audit_limit': 'Defined symbols establish retention when present; absence is inconclusive after stripping or inlining.',
             'configuration_audit_limit': 'Absent configuration strings do not establish which configure options were used; retain the source/build artifact evidence.',
             'converter_shipped_sha256': hashlib.sha256(converter).hexdigest(),
+            'converter_path': converter_path,
             'converter_version_from_build_pin': lock['converter']['version'],
             'converter_sections': sections,
             'legal_clearance': False,

@@ -29,6 +29,14 @@ release notes and any separately accepted beta terms. Record whether those
 terms make the copy evaluation-only and how they interact with section 2.B.
 Verify the granted use covers the app's on-device shader conversion.
 
+`tools/inspect_converter_installer.py` now collects package metadata and license
+resources from a locally acquired installer on macOS. It refuses a package or
+iOS payload whose SHA-256 differs from the lock, omits the proprietary payload
+from its evidence folder and leaves redistribution permission undetermined.
+Use its `--download-record` argument for the owner's source/date reference,
+without credentials. Separately accepted online terms still need to be retained
+and assessed; package inspection cannot recover a missing account agreement.
+
 If those materials do not establish the necessary rights, obtain Apple's
 permission or separately evaluate a licensed replacement with game regression
 testing. Do not replace the library merely to make the license checklist green.

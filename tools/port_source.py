@@ -32,6 +32,11 @@ def namespace(text, original):
     return re.sub(re.escape(original), replace, text, flags=re.I)
 
 
+def source_path(template, original):
+    """Git paths are case-sensitive even when the repository's title is not."""
+    return template.replace("{port_lower}", original.lower()).replace("{port}", original)
+
+
 def normalize(root, original):
     """Keep byte lengths intact in PE resources, imports and UTF-16 strings."""
     assert len(original) == len("DanPort"), "Review the pinned dependency namespace length"
@@ -102,8 +107,8 @@ def main():
     if args.command == "file":
         # The source folder name follows the pinned port; it is normalized locally afterwards.
         name = metadata(PORT_ID)["name"]
-        source_path = args.source_path.replace("{port}", name)
-        data = request(f"https://api.github.com/repositories/{args.repository_id}/contents/{source_path}?ref={args.ref}", raw=True)
+        remote_path = source_path(args.source_path, name)
+        data = request(f"https://api.github.com/repositories/{args.repository_id}/contents/{remote_path}?ref={args.ref}", raw=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         return

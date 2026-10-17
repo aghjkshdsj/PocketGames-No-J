@@ -11,6 +11,13 @@ spec.loader.exec_module(port)
 
 
 class NamespaceTests(unittest.TestCase):
+    def test_source_path_preserves_case_sensitive_upstream_paths(self):
+        self.assertEqual(port.source_path('app/{port}/d3d12/library.dylib', 'OldPort'),
+                         'app/OldPort/d3d12/library.dylib')
+        self.assertEqual(port.source_path('{port_lower}-d3d12/src/unix/{port_lower}_ir_unix.mm', 'OldPort'),
+                         'oldport-d3d12/src/unix/oldport_ir_unix.mm')
+        self.assertEqual(port.source_path('src/UnrelatedFile.mm', 'OldPort'), 'src/UnrelatedFile.mm')
+
     def test_symbols_and_environment_keys(self):
         self.assertEqual(port.namespace("OldPort oldport OLDPORT", "OldPort"), "DanPort danport DANPORT")
 

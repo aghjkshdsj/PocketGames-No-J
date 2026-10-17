@@ -33,6 +33,7 @@ MARK = "/* PocketGamesNoJ nojit-dylib */"
 HELPERS = MARK + r'''
 /* PocketGamesNoJ no-JIT: PE images from signed dylibs (engine/wine/patches/nojit_dylib.py). */
 #include <dlfcn.h>
+#include "pocketgames_framework_layout.h"
 
 struct ios_nojit_image
 {
@@ -231,7 +232,15 @@ static struct ios_nojit_image *ios_nojit_load( const UNICODE_STRING *nt_name, un
     name[n] = 0;
     if (!n) return NULL;
 
-    snprintf( path, sizeof(path), "%s/lib%s.dylib", dir, name );
+    {
+        const char *frameworks = getenv( "PocketGamesNoJ_FRAMEWORK_DIR" );
+        if (frameworks && *frameworks)
+        {
+            const char *group = machine == IMAGE_FILE_MACHINE_ARM64 ? "a64" : "ec";
+            if (!pg_framework_path( frameworks, group, name, path, sizeof(path) )) return NULL;
+        }
+        else snprintf( path, sizeof(path), "%s/lib%s.dylib", dir, name );
+    }
     pthread_mutex_lock( &ios_nojit_lock );
     {
         struct ios_nojit_image *first = NULL;

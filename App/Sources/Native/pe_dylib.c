@@ -509,7 +509,9 @@ bool mid_pe_dylib_spike(const char *dir, char *summary, size_t summary_len) {
     struct dirent *e;
     while ((e = readdir(d)) && count < 8) {
         size_t l = strlen(e->d_name);
-        if (l > 6 && !strcmp(e->d_name + l - 6, ".dylib")) snprintf(names[count++], sizeof names[0], "%s", e->d_name);
+        if ((l > 6 && !strcmp(e->d_name + l - 6, ".dylib")) ||
+            (l > 10 && !strncmp(e->d_name, "PGTest_", 7) && !strcmp(e->d_name + l - 10, ".framework")))
+            snprintf(names[count++], sizeof names[0], "%s", e->d_name);
     }
     closedir(d);
     // Spike aarch64, then spike arm64ec (needs more of the loader), then Wine's ntdll last.
@@ -525,6 +527,10 @@ bool mid_pe_dylib_spike(const char *dir, char *summary, size_t summary_len) {
     for (int i = 0; i < count; i++) {
         char path[1024], line[256];
         snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        size_t length = strlen(names[i]);
+        if (length > 10 && !strcmp(names[i] + length - 10, ".framework")) {
+            snprintf(path, sizeof path, "%s/%s/%.*s", dir, names[i], (int)(length - 10), names[i]);
+        }
         ok &= run_one(path, names[i], line, sizeof line);
         size_t used = strlen(summary);
         snprintf(summary + used, summary_len - used, "%s%s", used ? "\n" : "", line);

@@ -44,6 +44,10 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project PocketGamesNoJ.xcodeproj -scheme PocketGamesNoJ -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log
+      - name: Real iOS framework packaging and signing check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tests/runtime_frameworks_macos_test.py
       - uses: actions/upload-artifact@v5
         if: failure()
         with:

@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 import plistlib
 import struct
 import zipfile
+from runtime_framework_audit import validate as validate_frameworks
 
 PREFIX = 'Payload/PocketGamesNoJ.app/'
 
@@ -49,6 +50,14 @@ def audit(files, read):
         frameworks.append(name)
     if loose:
         blockers.append(f'{len(loose)} standalone dynamic libraries require framework packaging')
+    framework_inventory = None
+    if 'RuntimeFrameworks.json' in files:
+        try:
+            framework_inventory = validate_frameworks(files, read)
+            if framework_inventory != len(frameworks):
+                blockers.append('Native framework manifest does not cover the complete library inventory')
+        except (ValueError, KeyError, TypeError, OSError, plistlib.InvalidFileException) as error:
+            blockers.append('Native framework validation: ' + str(error))
     manifest = None
     if 'PrivacyInfo.xcprivacy' not in files:
         blockers.append('PrivacyInfo.xcprivacy is missing from the application root')
@@ -64,6 +73,7 @@ def audit(files, read):
         blockers.append('Known non-iOS-public displaySyncEnabled selector remains in the executable')
     return {'structural_blockers': blockers, 'standalone_dynamic_libraries': loose,
             'framework_executables': frameworks,
+            'verified_runtime_frameworks': framework_inventory,
             'privacy_collection_declaration': 'present-needs-review' if isinstance(manifest, dict) and
                 'NSPrivacyCollectedDataTypes' in manifest else 'pending-data-flow-review',
             'app_store_clearance': False,

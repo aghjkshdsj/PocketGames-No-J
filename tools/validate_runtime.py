@@ -11,6 +11,8 @@ from port_source import metadata, PORT_ID
 from prepare_licenses import validate_app
 from prepare_licenses import digest, ROOT, LEGAL
 import json
+from package_runtime_frameworks import framework_name
+from runtime_framework_audit import validate as validate_frameworks
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("app", type=Path)
@@ -27,11 +29,21 @@ required = [
     "PE/wine-a64/libxtajit.dll.dylib", "PE/wine-a64/xtajit.dll",
 ]
 for relative in required:
+    if (app / 'RuntimeFrameworks.json').is_file() and relative.endswith('.dylib'):
+        group = 'a64' if relative.startswith('PE/wine-a64/') else 'ec'
+        name = framework_name(group, Path(relative).name[3:-6])
+        relative = f'Frameworks/{name}.framework/{name}'
     path = app / relative
     assert path.is_file() and path.stat().st_size, f"Required game runtime missing: {relative}"
 info = plistlib.loads((app / "Info.plist").read_bytes())
 assert info["CFBundleDisplayName"] == "PocketGames No J", "Unexpected app display name"
 validate_app(app)
+if (app / 'RuntimeFrameworks.json').is_file():
+    files = {p.relative_to(app).as_posix() for p in app.rglob('*') if p.is_file()}
+    build = json.loads((app / 'Legal/build-info.json').read_text())
+    validate_frameworks(files, lambda name: (app / name).read_bytes(), build['revision'])
+else:
+    assert (app / 'd3d12/libmetalirconverter.dylib').is_file(), 'Missing shader converter'
 legal_hashes = {d['sha256'] for d in json.loads((ROOT / LEGAL / 'index.json').read_text(encoding='utf-8'))['documents']}
 name = metadata(PORT_ID)["name"]
 patterns = [re.compile(re.escape(name.encode()), re.I)]
