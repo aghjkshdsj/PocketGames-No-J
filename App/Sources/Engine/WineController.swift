@@ -26,8 +26,19 @@ final class WineController: ObservableObject, @unchecked Sendable {
 
     /// The signed Wine dylibs (engine/pedylib), present when CI converted the DLL farm.
     static let peWineDir = Bundle.main.bundlePath + "/PE/wine"
+    static var frameworkLayout: Bool {
+        FileManager.default.fileExists(atPath: Bundle.main.bundlePath + "/RuntimeFrameworks.json")
+    }
+    static func nativeModulePath(_ name: String, a64: Bool = false) -> String {
+        if frameworkLayout {
+            let stem = (a64 ? "PGA64_" : "PGEC_") + name.lowercased()
+                .replacingOccurrences(of: ".", with: "_").replacingOccurrences(of: "-", with: "_")
+            return Bundle.main.bundlePath + "/Frameworks/\(stem).framework/\(stem)"
+        }
+        return (a64 ? peWineA64Dir : peWineDir) + "/lib\(name).dylib"
+    }
     static var signedWineAvailable: Bool {
-        FileManager.default.fileExists(atPath: peWineDir + "/libntdll.dll.dylib")
+        FileManager.default.fileExists(atPath: nativeModulePath("ntdll.dll"))
     }
     /// The aarch64 farm as signed dylibs: Wine maps aarch64 images from here (nojit_dylib.py).
     static let peWineA64Dir = Bundle.main.bundlePath + "/PE/wine-a64"
@@ -36,8 +47,8 @@ final class WineController: ObservableObject, @unchecked Sendable {
     static var wow64Available: Bool {
         let fm = FileManager.default
         return fm.fileExists(atPath: Bundle.main.bundlePath + "/i386-windows/ntdll.dll") &&
-            fm.fileExists(atPath: peWineA64Dir + "/libntdll.dll.dylib") &&
-            fm.fileExists(atPath: peWineA64Dir + "/libxtajit.dll.dylib") &&
+            fm.fileExists(atPath: nativeModulePath("ntdll.dll", a64: true)) &&
+            fm.fileExists(atPath: nativeModulePath("xtajit.dll", a64: true)) &&
             fm.fileExists(atPath: peWineA64Dir + "/xtajit.dll")
     }
     static let wow64Refusal = "This build is missing the files required for 32-bit games. Install a complete build to play this game."
@@ -377,12 +388,18 @@ final class WineController: ObservableObject, @unchecked Sendable {
             guard Self.signedWineAvailable else {
                 return refuse("This build has no signed Wine DLLs (interpreter Wine).")
             }
-            if program.aarch64 && !FileManager.default.fileExists(atPath: Self.peWineA64Dir + "/libntdll.dll.dylib") {
+            if program.aarch64 && !FileManager.default.fileExists(atPath: Self.nativeModulePath("ntdll.dll", a64: true)) {
                 return refuse("This build has no signed aarch64 Wine DLLs.")
             }
             setenv("WINE_IOS_NOJIT", "1", 1)
             setenv("PocketGamesNoJ_PE_DIR", Self.peWineDir, 1)
             setenv("PocketGamesNoJ_PE_DIR_A64", Self.peWineA64Dir, 1)
+            if Self.frameworkLayout {
+                setenv("PocketGamesNoJ_FRAMEWORK_DIR", Bundle.main.bundlePath + "/Frameworks", 1)
+                dlog("[wine] native framework layout active (EC and aarch64)")
+            } else {
+                unsetenv("PocketGamesNoJ_FRAMEWORK_DIR")
+            }
             setenv("PocketGamesNoJ_NOJIT_EMULATOR", Self.peWineDir + "/xtajit64.dll", 1)
             // 32-bit programs: wow64.dll's CPU module is FXI32's front end (system32\xtajit.dll).
             if FileManager.default.fileExists(atPath: Self.peWineA64Dir + "/xtajit.dll") {

@@ -15,6 +15,10 @@ cc -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -pthread \
 python3 "$ROOT/tests/wow_window_bounds_test.py"
 python3 "$ROOT/tests/compliance_tools_test.py"
 python3 "$ROOT/tests/app_store_preparation_test.py"
+python3 "$ROOT/tests/runtime_frameworks_test.py"
+cc -std=c11 -Wall -Wextra -Werror -I"$ROOT/engine/pedylib" \
+    "$HERE/runtime_frameworks/main.c" -o "$OUT/runtime-framework-tests"
+"$OUT/runtime-framework-tests"
 swiftc --version | head -1
 # Sign-in status polling survives app-switch connection loss without replaying
 # credentials or ignoring cancellation / the original session deadline.

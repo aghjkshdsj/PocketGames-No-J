@@ -1,23 +1,21 @@
-# App Store preparation — October 16, 2026
+# App Store preparation — October 17, 2026
 
-This branch is a preparation and regression-test candidate. Build 7 remains the
-delivered gameplay baseline: the user reported Forager running at a stable
-60 FPS on iPhone 15 Pro Max, iOS 27.0.1, installed with iLoader. That result does
-not establish performance of this branch or other games.
-
-Build 9 at `396493dbf31cc1f3f3625a8e64ba4950b1ac8832` subsequently passed the
-complete IPA and modified-GnuTLS relink checks. The user confirmed Forager still
-works with that candidate; the supplied device log includes successful 32-bit
-window reservation and rendering with sampled frame gaps around 16.7 ms.
-Steam testing remains pending. The supplied red controller artwork is now the
-app icon for subsequent packages; it does not change the already-built IPA.
+This branch is a preparation and regression-test candidate. Build 15 at
+`a1d582b34be06ae5867cb1230b8c30167b7208b9` is the latest delivered baseline;
+the owner reports everything looks good. Earlier tests confirmed Forager at
+60 FPS and Dokimon With Steam, manual cloud download and manual cloud upload
+on iPhone 15 Pro Max with iLoader. Automatic post-game upload was not separately
+confirmed. Keep the working IPA while testing the framework migration described
+in `FRAMEWORK_MIGRATION.md`. These results do not prove a changed native-library
+layout works or that every game is supported.
 
 ## Implemented here
 
 - Settings → About → Privacy opens an offline policy describing local storage,
   optional Steam authentication/downloads, cloud saves, sharing and deletion.
-  The policy also has a public repository URL once merged. Publishing identity
-  and a suitable private support contact still need to be finalized.
+  The contact is officialpocketgame@gmail.com; optional GitHub privacy/support
+  buttons are removed while required legal/source access remains. Publishing
+  identity, public support/privacy URLs and mailbox delivery still need review.
 - The app bundles a privacy manifest with the observed required API reasons.
   `PRIVACY_REVIEW.md` records the evidence and remaining data-flow review. It
   deliberately does not assert a completed "Data Not Collected" label.
@@ -31,16 +29,20 @@ app icon for subsequent packages; it does not change the already-built IPA.
   GnuTLS stack, introduces a diagnostic witness in GnuTLS session creation,
   relinks the app and requires that witness in the application executable.
   It uploads a separate IPA and rebuild evidence without publishing a release.
+- The optional `framework_layout` validation builds an unsigned Xcode archive,
+  migrates native libraries with loader/signing checks and requires a structural
+  pass before and after signing. Four fresh runtime builds are required for
+  the loader changes. On-device validation remains a separate gate.
 
 ## Remaining engineering gates
 
 | Gate | Evidence still required |
 | --- | --- |
-| Native library packaging | Replace standalone PE wrapper dylibs and converter dylib with proper frameworks, retaining code identity, module lookup, resources and signing order; test both 32-bit and 64-bit paths. |
+| Native library packaging | Verify the opt-in framework candidate's archive, section preservation, code signing, module lookup and both 32-bit and 64-bit runtime paths. |
 | Rendering regression | Install this candidate on the same phone, reproduce Forager startup, gameplay, audio and frame pacing; also run the built-in Direct3D samples. |
 | Privacy | Finish required-API/data-flow review of linked runtimes and guest-facing APIs; finalize manifest collection declarations and App Store privacy answers, including Valve and CDN handling. |
 | LGPL | Complete modified-library build, independent source reconstruction, necessary application materials and authorized-device installation/replacement tests; establish source equivalence of prebuilt guest DLLs. |
-| Rights | Resolve GPL/store permission, exact converter beta terms and authorization for the integrated Steam services. See APP_STORE_LICENSING.md. |
+| Rights | Resolve GPL/store permission, exact converter beta terms and authorization for the integrated Steam services. See DISTRIBUTION_RIGHTS_REVIEW.md and APP_STORE_LICENSING.md. |
 | Emulator review | Prepare content inventory/deep links, age controls and consent/service explanations appropriate to the actual features; resolve native API exposure with Apple before submission. |
 | Distribution | Create a real archive/export configuration and validate the paid provisioning profile with both memory entitlements; test through TestFlight. The current ad-hoc IPA is a sideload artifact. |
 

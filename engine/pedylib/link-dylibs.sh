@@ -14,7 +14,7 @@ n=0
 for s in "$IN"/*.S; do
     stem="$(basename "$s" .S)"
     (cd "$IN" && xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 -dynamiclib \
-        -install_name "@rpath/lib$stem.dylib" -o "$DST/lib$stem.dylib" "$stem.S")
+        -Wl,-headerpad_max_install_names -install_name "@rpath/lib$stem.dylib" -o "$DST/lib$stem.dylib" "$stem.S")
     # The PE layout only holds if __DATA's payload starts exactly where __TEXT's ends.
     syms=$(xcrun nm "$DST/lib$stem.dylib")
     img=$(awk '$3=="_pocketgamesnoj_pe_image"{print $1}' <<<"$syms")

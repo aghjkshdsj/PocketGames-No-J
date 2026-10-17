@@ -157,7 +157,7 @@ struct PerformanceView: View {
     private func runPETest() {
         peBusy = true
         peResult = nil
-        let dir = Bundle.main.bundlePath + "/PE"
+        let dir = Bundle.main.bundlePath + (WineController.frameworkLayout ? "/Frameworks" : "/PE")
         DispatchQueue.global(qos: .userInitiated).async {
             var buf = [CChar](repeating: 0, count: 1024)
             let ok = mid_pe_dylib_spike(dir, &buf, buf.count)

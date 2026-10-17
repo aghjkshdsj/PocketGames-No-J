@@ -3,6 +3,10 @@ name: Build IPA
 on:
   workflow_dispatch:
     inputs:
+      framework_layout:
+        description: Test native framework packaging in an unsigned archive (requires LGPL validation; no release)
+        type: boolean
+        default: false
       lgpl_validation:
         description: Test a modified LGPL library in a separate IPA (no release publication)
         type: boolean
@@ -32,7 +36,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Verify runtime source inputs
-        run: python3 tools/verify_runtime_source.py
+        run: |
+          if [ "${{ inputs.framework_layout }}" = true ] && [ "${{ inputs.lgpl_validation }}" != true ]; then
+            echo 'Framework candidates require lgpl_validation=true and never publish a release.' >&2
+            exit 1
+          fi
+          python3 tools/verify_runtime_source.py
       - name: Require successful runtimes from this exact revision
         run: python3 tools/wait_for_runtimes.py
 
@@ -263,24 +272,42 @@ jobs:
       - name: Build app
         run: |
           mkdir -p build
+          ACTION=build
+          EXTRA=()
+          APP=build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
+          DSYM="$APP.dSYM"
+          if [ "${{ inputs.framework_layout }}" = true ]; then
+            ACTION=archive
+            EXTRA=(-archivePath build/PocketGamesNoJ.xcarchive)
+            APP=build/PocketGamesNoJ.xcarchive/Products/Applications/PocketGamesNoJ.app
+            DSYM=build/PocketGamesNoJ.xcarchive/dSYMs/PocketGamesNoJ.app.dSYM
+          fi
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+          echo "DSYM_PATH=$DSYM" >> "$GITHUB_ENV"
           xcodebuild -project PocketGamesNoJ.xcodeproj -scheme PocketGamesNoJ -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            CODE_SIGNING_ALLOWED=NO build > build/xcodebuild.log 2>&1 || true
+            CODE_SIGNING_ALLOWED=NO "${EXTRA[@]}" "$ACTION" > build/xcodebuild.log 2>&1 || true
           grep -E '(error:|\*\* BUILD)' build/xcodebuild.log | head -100 || true
-          grep -q '\*\* BUILD SUCCEEDED \*\*' build/xcodebuild.log
+          grep -Eq '\*\* (BUILD|ARCHIVE) SUCCEEDED \*\*' build/xcodebuild.log
+
+      - name: Package native runtime frameworks in the archive
+        if: inputs.framework_layout
+        run: python3 tools/package_runtime_frameworks.py "$APP_PATH" --revision "$GITHUB_SHA"
 
       - name: Verify complete game bundle
-        run: python3 tools/validate_runtime.py build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
+        run: python3 tools/validate_runtime.py "$APP_PATH"
 
       - name: Record App Store structural audit (sideload packaging is not cleared for submission)
         run: |
-          python3 tools/audit_app_store.py --app build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app --output build/app-store-audit.json
+          EXTRA=()
+          if [ "${{ inputs.framework_layout }}" = true ]; then EXTRA=(--require-structural-pass); fi
+          python3 tools/audit_app_store.py --app "$APP_PATH" --output build/app-store-audit.json "${EXTRA[@]}"
 
       - name: Package IPA
         id: pkg
         run: |
-          APP=build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app
+          APP="$APP_PATH"
           rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
           # Ad-hoc signature carrying our entitlements, so the sideloader knows to
           # request the increased memory limit when it re-signs.
@@ -293,16 +320,26 @@ jobs:
             codesign --force --sign - --timestamp=none "$f" 2>/dev/null
             PEDYLIBS=$((PEDYLIBS + 1))
           done < <(find Payload/PocketGamesNoJ.app/PE -name '*.dylib' 2>/dev/null)
+          while IFS= read -r f; do
+            codesign --force --sign - --timestamp=none "$f"
+            codesign --verify --strict --verbose=2 "$f"
+            PEDYLIBS=$((PEDYLIBS + 1))
+          done < <(find Payload/PocketGamesNoJ.app/Frameworks -maxdepth 1 -type d -name '*.framework' 2>/dev/null)
           codesign --force --sign - --entitlements App/PocketGamesNoJ.entitlements --timestamp=none Payload/PocketGamesNoJ.app
+          codesign --verify --deep --strict --verbose=2 Payload/PocketGamesNoJ.app
           codesign -d --entitlements - Payload/PocketGamesNoJ.app || true
           FLAVOR=""
           [ "${{ steps.blink.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}interp"
           [ "${{ steps.wine.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}wine"
           [ "${{ steps.dxmt.outcome }}" = success ] && FLAVOR="${FLAVOR:+$FLAVOR-}dxmt"
           [ -n "$FLAVOR" ] || FLAVOR=uionly
+          [ "${{ inputs.framework_layout }}" != true ] || FLAVOR="$FLAVOR-frameworks"
           [ "${{ inputs.lgpl_validation }}" != true ] || FLAVOR="$FLAVOR-lgpl-validation"
           NAME="PocketGamesNoJ-0.1.0-build${{ github.run_number }}-${FLAVOR}.ipa"
           zip -qry "$NAME" Payload
+          if [ "${{ inputs.framework_layout }}" = true ]; then
+            python3 tools/audit_app_store.py --ipa "$NAME" --output build/app-store-audit-signed.json --require-structural-pass
+          fi
           ls -la "$NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "flavor=$FLAVOR" >> "$GITHUB_OUTPUT"
@@ -335,7 +372,7 @@ jobs:
         if: always()
         with:
           name: dsym
-          path: build/dd/Build/Products/Release-iphoneos/PocketGamesNoJ.app.dSYM
+          path: ${{ env.DSYM_PATH }}
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v5
@@ -346,6 +383,7 @@ jobs:
             build/xcodebuild.log
             build/pe-audit.json
             build/app-store-audit.json
+            build/app-store-audit-signed.json
           if-no-files-found: ignore
 
       - name: Preserve modified-library rebuild and relink evidence
@@ -361,7 +399,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release
-        if: github.event_name != 'pull_request' && !inputs.lgpl_validation
+        if: github.event_name != 'pull_request' && !inputs.lgpl_validation && !inputs.framework_layout
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
