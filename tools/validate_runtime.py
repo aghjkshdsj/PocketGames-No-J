@@ -18,6 +18,7 @@ args = parser.parse_args()
 app = args.app
 required = [
     "PocketGamesNoJ", "Info.plist", "prefix-template.tar.gz",
+    "PrivacyInfo.xcprivacy", "PrivacyPolicy.txt",
     "arm64ec-windows/dockhost.exe", "i386-windows/ntdll.dll",
     "PE/wine/libntdll.dll.dylib", "PE/wine/libkernel32.dll.dylib",
     "PE/wine/libkernelbase.dll.dylib", "PE/wine/libuser32.dll.dylib",

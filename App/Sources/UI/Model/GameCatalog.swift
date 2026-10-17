@@ -137,6 +137,7 @@ final class UIState: ObservableObject {
         case benchmarks
         case developer
         case licenses
+        case privacy
         case licenseDocument(String)
     }
 

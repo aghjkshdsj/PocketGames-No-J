@@ -17,6 +17,19 @@ import Foundation
 /// session followed by minutes of polling. The header is checked here and
 /// mapped to a specific error. Request and response bodies are never logged.
 enum SteamAuthAPI {
+    /// A transient lost connection while the user approves Steam Guard should
+    /// not abandon a valid session. The caller supplies the original deadline;
+    /// retries never extend it or repeat credentials/code submissions.
+    static func poll(body: Data, until deadline: Date) async throws -> Data? {
+        try await SteamAuthNetwork.recoverPoll(until: deadline, onRetry: { error, attempt in
+            if attempt == 1 {
+                SteamLog.event("[steam-auth] poll interrupted url=\(error.code.rawValue); keeping pending sign-in")
+            }
+        }) {
+            try await call("PollAuthSessionStatus", body: body)
+        }
+    }
+
     static func call(_ method: String, body: Data, httpMethod: String = "POST") async throws -> Data {
         let baseURL = "https://api.steampowered.com/IAuthenticationService/\(method)/v1/"
 

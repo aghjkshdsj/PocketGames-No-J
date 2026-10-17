@@ -203,22 +203,91 @@ record.rules = rules
 let decoded = try! JSONDecoder().decode(SteamCloudRecord.self, from: try! JSONEncoder().encode(record))
 check(decoded == record, "record JSON round trip")
 
+// MARK: - Explicit Download versus ordinary synchronization
+
+let identicalDokimon = ["save.sav", "world_save.sav", "world_temp_data.sav"].map {
+    entry($0, .same, local: "cloud save bytes", cloud: "cloud save bytes")
+}
+let forced = SteamCloudManualSelection.entries(identicalDokimon, upload: false)
+check(forced.map(\.name) == identicalDokimon.map(\.name), "manual Download re-fetches all three identical Dokimon saves")
+check(SteamCloudManualSelection.entries(identicalDokimon, upload: true).isEmpty, "manual Upload does not rewrite identical files")
+let automatic = plan(identicalDokimon)
+check(automatic.download.isEmpty && automatic.upload.isEmpty, "automatic sync still skips matching saves")
+let mixedTransfers = identicalDokimon + [entry("cloud.sav", .cloudOnly, cloud: "remote"),
+    entry("local.sav", .localOnly, local: "local"), entry("changed.sav", .differ, local: "local", cloud: "remote")]
+let downNames = Set(SteamCloudManualSelection.entries(mixedTransfers, upload: false).map(\.name))
+let upNames = Set(SteamCloudManualSelection.entries(mixedTransfers, upload: true).map(\.name))
+check(downNames.count == 5 && !downNames.contains("local.sav"), "manual Download includes existing and cloud-only saves but not files absent from cloud")
+check(upNames == Set(["local.sav", "changed.sav"]), "manual Upload retains its existing selection rules")
+
 // MARK: - Backups
+
+// A sync baseline established in mobile must never authorize uploading the
+// different one-minute save found after switching to the game's other profile.
+var switched = SteamCloudRecord()
+switched.files = [key("save.sav"): synced("PC 12 minutes")]
+switched.changeNumber = 7
+let otherGame = switched
+switched.selectSaveProfile("mythic")
+check(switched.saveProfileName == "mythic" && switched.profileChoicePending == true, "profile selection is pinned and requires a manual choice")
+check(switched.files.isEmpty && switched.changeNumber == 0, "old directory's baseline is invalidated")
+let profileAudit = [entry("save.sav", .differ, local: "phone 1 minute", cloud: "PC 12 minutes"),
+    entry("world_save.sav", .cloudOnly, cloud: "PC world"), entry("phone-only.sav", .localOnly, local: "old")]
+let held = plan(profileAudit, switched, change: 7)
+check(held.needsProfileChoice && !held.isClear && held.upload.isEmpty && held.download.isEmpty,
+      "new profile cannot automatically upload, download or claim it is in sync")
+check(SteamCloudManualSelection.entries(profileAudit, upload: false).count == 2, "explicit Download still selects PC copies for the new profile")
+check(otherGame.files.count == 1 && otherGame.profileChoicePending == nil, "another game's record is unchanged")
+let pinnedRoundTrip = try! JSONDecoder().decode(SteamCloudRecord.self, from: JSONEncoder().encode(switched))
+check(pinnedRoundTrip == switched, "profile and pending choice survive app restart")
+let legacyData = try! JSONEncoder().encode(otherGame)
+let legacyRecord = try! JSONDecoder().decode(SteamCloudRecord.self, from: legacyData)
+check(legacyRecord.saveProfileName == nil && legacyRecord.profileChoicePending == nil, "legacy records retain automatic selection")
+var differentDestination = paths
+differentDestination.userFolder = drive.appendingPathComponent("users/mythic", isDirectory: true)
+check(differentDestination != paths, "a confirmation for mobile cannot be reused for mythic even with the same filenames")
+
+check(SteamCloudProfiles.defaultName(appID: 2019300) == "mythic", "Dokimon defaults to the device-confirmed profile")
+check(SteamCloudProfiles.defaultName(appID: 751780) == nil, "Forager's existing automatic mapping is unchanged")
+var defaultFresh = SteamCloudRecord()
+check(defaultFresh.adoptDefaultSaveProfile("mythic", hasLocalSaves: false), "a clean setup adopts the default")
+check(defaultFresh.saveProfileName == "mythic" && defaultFresh.profileChoicePending != true,
+      "clean first setup can download cloud saves normally")
+var defaultLegacy = otherGame
+check(defaultLegacy.adoptDefaultSaveProfile("mythic", hasLocalSaves: false), "legacy automatic mapping adopts the default")
+check(defaultLegacy.files.isEmpty && defaultLegacy.profileChoicePending == true,
+      "legacy baseline is cleared and transfers are held before migration")
+check(plan(profileAudit, defaultLegacy, change: 7).upload.isEmpty, "legacy one-minute save cannot replace PC progress automatically")
+var defaultLocal = SteamCloudRecord()
+_ = defaultLocal.adoptDefaultSaveProfile("mythic", hasLocalSaves: true)
+check(defaultLocal.profileChoicePending == true, "even without a sync record, existing local progress requires confirmation")
+var confirmedProfile = defaultFresh
+confirmedProfile.files = [key("save.sav"): synced("PC 12 minutes")]
+confirmedProfile.changeNumber = 7
+let confirmedBefore = confirmedProfile
+check(!confirmedProfile.adoptDefaultSaveProfile("mythic", hasLocalSaves: true) && confirmedProfile == confirmedBefore,
+      "the successful build 14 selection and baseline are preserved without another hold")
+var customProfile = SteamCloudRecord()
+customProfile.saveProfileName = "mobile"
+let customBefore = customProfile
+check(!customProfile.adoptDefaultSaveProfile("mythic", hasLocalSaves: true) && customProfile == customBefore,
+      "an explicit alternative selection is not overridden by the default")
 
 let now = Date(timeIntervalSince1970: 2_000_000_000)
 func backups(_ ages: [Double]) -> [(name: String, created: Date)] {
     ages.enumerated().map { ("b\($0.offset)", now.addingTimeInterval(-$0.element * 86_400)) }
 }
-check(SteamCloudBackupRetention.expired(backups(Array(repeating: 1, count: 100)), now: now).isEmpty, "recent backups all stay")
-let old = backups((0..<40).map { 100 + Double($0) })   // 40 backups, all older than 60 days
-let dropped = Set(SteamCloudBackupRetention.expired(old, now: now))
-check(dropped.count == 10, "beyond 30, the oldest go (\(dropped.count))")
-check(dropped == Set((30..<40).map { "b\($0)" }), "only the oldest ones")
-let mixed = backups((0..<12).map { 200 + Double($0) })   // 12 old: under the limit
-check(SteamCloudBackupRetention.expired(mixed, now: now).isEmpty, "under the limit nothing goes, however old")
-let many = backups((0..<45).map { 70 + Double($0) })
-let gone = SteamCloudBackupRetention.expired(many, now: now)
-check(!gone.contains { ["b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9"].contains($0) }, "the newest ten never go")
+check(SteamCloudBackupRetention.expired(backups([1, 2, 3, 4, 5])).isEmpty, "five backups remain")
+check(SteamCloudBackupRetention.expired(backups([1, 2, 3, 4, 5, 6])) == ["b5"], "the sixth removes only the oldest")
+check(SteamCloudBackupRetention.expired(backups([100, 200, 300, 400, 500])).isEmpty, "five old backups also remain")
+let recent = backups((0..<100).map { Double($0) / 100 })
+check(SteamCloudBackupRetention.expired(recent).count == 95, "recent backups obey the same five-set cap")
+check(Set(SteamCloudBackupRetention.expired(backups((0..<12).map(Double.init)))) ==
+      Set((5..<12).map { "b\($0)" }), "an existing collection is reduced to its newest five")
+let rollback = backups([1, 2, 3, 4, 5]) + [("new", Date(timeIntervalSince1970: 1))]
+check(!SteamCloudBackupRetention.expired(rollback, keeping: "new").contains("new"), "the just-completed backup survives a clock rollback")
+let tied = (0..<6).map { (name: "same-\($0)", created: now) }
+check(SteamCloudBackupRetention.expired(tied) == ["same-0"], "equal timestamps have a deterministic order")
 
 try? FileManager.default.removeItem(at: root)
 print("steam cloud host tests: \(checks - failures)/\(checks) passed")

@@ -10,6 +10,12 @@ struct SteamCloudSection: View {
     @ObservedObject private var cloud = SteamCloudSync.shared
     @State private var backups: [SteamCloudBackup] = []
     @State private var restoring: SteamCloudBackup?
+    @State private var deleting: SteamCloudBackup?
+    @State private var archiving: SteamCloudEntry?
+    private struct ProfileChoice: Identifiable { let name: String; var id: String { name } }
+    @State private var choosingProfile: ProfileChoice?
+    @State private var profiles: [String] = []
+    @State private var showProfiles = false
     @State private var message: String?
     @State private var working = false
     @State private var showBackups = false
@@ -41,9 +47,12 @@ struct SteamCloudSection: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(working || gameRunning || cloud.isBusy(appID))
+                Text("Download fetches fresh cloud copies and backs up the local saves first, including files marked identical.")
+                    .font(.caption).foregroundStyle(Deck.dim)
                 if gameRunning {
                     Text("The game is running: its saves sync when it ends.").font(.caption).foregroundStyle(Deck.dim)
                 }
+                saveLocation
                 files
             }
             backupList
@@ -65,6 +74,29 @@ struct SteamCloudSection: View {
                 run { message = await cloud.restore(appID, backup) }
              }, .cancel()]
         }
+        .glassDialog(item: $choosingProfile, title: { "Use \($0.name) for this game's saves?" }, message: { _ in "Only this game's cloud location changes. Existing folders and saves stay in place. Automatic syncing pauses until you confirm Download saves or Upload saves for this location. Download backs up local copies before replacement." }) { choice in
+            [DialogButton(title: "Use this folder") {
+                run { message = await cloud.selectSaveProfile(appID, name: choice.name) }
+             }, .cancel()]
+        }
+        .glassDialog(item: $archiving, title: { "Move \($0.name) to backup?" }, message: { _ in "This file is only on this iPhone. It will be backed up, then removed from the game's active save folder. Steam Cloud files are unchanged. You can restore the file from Backups. The five-backup limit applies." }) { entry in
+            [DialogButton(title: "Move to backup") {
+                run { message = await cloud.archivePhoneOnly(appID, entry) }
+             }, .cancel()]
+        }
+        .glassDialog(item: $deleting, title: { "Delete the backup of \(Self.date($0.created))?" }, message: { _ in "This permanently deletes this backup set. Your current game saves and Steam Cloud files are kept." }) { backup in
+            [DialogButton(title: "Delete backup") {
+                run {
+                    guard !gameRunning, !cloud.isBusy(appID) else {
+                        message = "Wait until the game and its sync have ended."; return
+                    }
+                    do {
+                        try SteamCloudBackups.delete(appID, backup)
+                        message = "Backup deleted."
+                    } catch { message = error.localizedDescription }
+                }
+             }, .cancel()]
+        }
     }
 
     /// A manual upload or download waiting for the user's confirmation.
@@ -75,8 +107,13 @@ struct SteamCloudSection: View {
             switch await cloud.prepareManual(appID, upload: upload) {
             case .success(let t):
                 if t.entries.isEmpty {
-                    message = upload ? "Nothing to upload: Steam Cloud already has every save this iPhone has."
-                                     : "Nothing to download: this iPhone already has every save Steam Cloud has."
+                    if upload {
+                        message = "Nothing to upload: Steam Cloud already has every save this iPhone has."
+                    } else if state.audit.cloudFiles == 0 {
+                        message = "Steam Cloud returned no saved files for this game and account."
+                    } else {
+                        message = "The cloud files could not be mapped to supported save folders on this device. No saves were replaced."
+                    }
                 } else {
                     manual = t
                 }
@@ -95,11 +132,49 @@ struct SteamCloudSection: View {
         }
     }
 
-    private func reloadBackups() { backups = SteamCloudBackups.list(appID) }
+    private func reloadBackups() {
+        profiles = SteamCloudProfiles.names(drive: SteamLibrary.drive)
+        if !gameRunning, !cloud.isBusy(appID) {
+            do { try SteamCloudBackups.prune(appID) }
+            catch { message = "Backup cleanup could not finish: \(error.localizedDescription)" }
+        }
+        backups = SteamCloudBackups.list(appID)
+    }
 
     // MARK: Parts
 
+    private var saveLocation: some View {
+        DisclosureGroup(isExpanded: $showProfiles) {
+            Text("Choose the Windows user folder the game uses. After changing it, choose Download saves to bring PC progress into that folder.")
+                .font(.caption).foregroundStyle(Deck.dim)
+            ForEach(profiles, id: \.self) { name in
+                Button {
+                    choosingProfile = ProfileChoice(name: name)
+                } label: {
+                    HStack {
+                        Text(name)
+                        Spacer()
+                        if name == (record.saveProfileName ?? state.saveProfileName) { Image(systemName: "checkmark") }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(working || gameRunning || cloud.isBusy(appID))
+                .padFocus("cloud.profile.\(name)", radius: 10) {
+                    if !(working || gameRunning || cloud.isBusy(appID)) { choosingProfile = ProfileChoice(name: name) }
+                }
+            }
+        } label: {
+            Text("Save location: \(record.saveProfileName ?? state.saveProfileName ?? "Automatic")")
+                .font(.subheadline)
+                .padFocus("cloud.profile", radius: 8) { withGlassAnimation { showProfiles.toggle() } }
+        }
+    }
+
     @ViewBuilder private var status: some View {
+        if record.profileChoicePending == true {
+            Text("Automatic syncing is paused for the new save location. Confirm Download saves or Upload saves first.")
+                .font(.caption).foregroundStyle(.orange)
+        }
         switch state.phase {
         case .checking:
             HStack { ProgressView(); Text("Comparing with Steam Cloud…").font(.caption).foregroundStyle(Deck.dim) }
@@ -133,7 +208,7 @@ struct SteamCloudSection: View {
         if let last = record.lastSync { parts.append("Last sync \(Self.date(last)).") } else { parts.append("Not synced yet on this iPhone.") }
         if let result = state.lastResult { parts.append(result) }
         if state.droppedInCloud > 0 { parts.append("\(state.droppedInCloud) save\(state.droppedInCloud == 1 ? " was" : "s were") removed from the cloud elsewhere and kept here (not sent back).") }
-        if !state.audit.unmapped.isEmpty { parts.append("\(state.audit.unmapped.count) cloud file\(state.audit.unmapped.count == 1 ? " is" : "s are") for another platform.") }
+        if !state.audit.unmapped.isEmpty { parts.append("\(state.audit.unmapped.count) cloud file\(state.audit.unmapped.count == 1 ? " has" : "s have") no supported save folder here.") }
         return parts.joined(separator: " ")
     }
 
@@ -202,6 +277,14 @@ struct SteamCloudSection: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(e.name).font(.caption).lineLimit(1)
+                            if e.kind == .localOnly {
+                                Button("Move to backup…") { archiving = e }
+                                    .buttonStyle(.bordered)
+                                    .disabled(working || gameRunning || cloud.isBusy(appID))
+                                    .padFocus("cloud.archive.\(e.id)", radius: 10) {
+                                        if !(working || gameRunning || cloud.isBusy(appID)) { archiving = e }
+                                    }
+                            }
                             Text(Self.folder(e.path)).font(.caption2).foregroundStyle(Deck.dim).lineLimit(1)
                         }
                         Spacer()
@@ -226,14 +309,20 @@ struct SteamCloudSection: View {
                         Spacer()
                         Button("Restore…") { restoring = b }
                             .buttonStyle(.bordered)
-                            .disabled(working || gameRunning)
-                            .padFocus("cloud.restore.\(b.id)", radius: 10) { if !(working || gameRunning) { restoring = b } }
+                            .disabled(working || gameRunning || cloud.isBusy(appID))
+                            .padFocus("cloud.restore.\(b.id)", radius: 10) { if !(working || gameRunning || cloud.isBusy(appID)) { restoring = b } }
+                        Button("Delete", role: .destructive) { deleting = b }
+                            .buttonStyle(.bordered)
+                            .disabled(working || gameRunning || cloud.isBusy(appID))
+                            .padFocus("cloud.delete.\(b.id)", radius: 10) { if !(working || gameRunning || cloud.isBusy(appID)) { deleting = b } }
                     }
                 }
                 Text("In the Files app: On My iPhone › PocketGames No J › save-backups › \(String(appID)).")
                     .font(.caption2).foregroundStyle(Deck.dim)
+                Text("Keeps the five newest backup sets per game. A completed sixth backup replaces the oldest.")
+                    .font(.caption2).foregroundStyle(Deck.dim)
             } label: {
-                Text("Backups (\(backups.count))")
+                Text("Backups (\(backups.count)/5)")
                     .padFocus("cloud.backups", radius: 8) { withGlassAnimation { showBackups.toggle() } }
             }
             .font(.subheadline)
@@ -321,7 +410,11 @@ struct ManualTransferSheet: View {
             List {
                 Section {
                     Label {
-                        Text(warning).font(.subheadline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(warning).font(.subheadline.weight(.semibold))
+                            Text("Windows user folder: \(transfer.paths.userFolder.lastPathComponent)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     } icon: {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     }
@@ -356,7 +449,7 @@ struct ManualTransferSheet: View {
                 } footer: {
                     Text(upload
                          ? "These saves on this iPhone go up to Steam Cloud, where every device signed in to this account (a PC too) gets them. The cloud's copies they replace are downloaded into save-backups first. Nothing is deleted in the cloud."
-                         : "These saves come down from Steam Cloud to where the game reads them. This iPhone's copies they replace go to save-backups first. Nothing is deleted on this iPhone.")
+                         : "These saves come down from Steam Cloud to where the game reads them. This iPhone's copies are backed up before replacement. The five newest backup sets are kept; no files are deleted from Steam Cloud.")
                 }
             }
             .navigationTitle(upload ? "Upload to Steam Cloud" : "Download from Steam Cloud")

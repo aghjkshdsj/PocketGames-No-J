@@ -69,10 +69,9 @@ final class GameHostView: UIView, UIKeyInput {
         metalLayer.device = MTLCreateSystemDefaultDevice()
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
-        // Private on iOS (public on macOS): keeps presents out of display-sync
-        // scheduling, which drops them at low present rates (the upstream port, MeloNX).
-        let sync = NSSelectorFromString("setDisplaySyncEnabled:")
-        if metalLayer.responds(to: sync) { metalLayer.perform(sync, with: NSNumber(value: false)) }
+        // Use iOS's public presentation behavior. displaySyncEnabled is only a
+        // documented property on macOS/Mac Catalyst. Test frame pacing on-device
+        // against build 7 when changing the layer's presentation configuration.
         // Seed once so DXMT's swapchain never waits on a zero-sized layer; after
         // this DXMT is the only drawableSize writer.
         metalLayer.drawableSize = CGSize(width: 800, height: 600)

@@ -271,6 +271,20 @@ struct SteamCloudAudit: Equatable, Sendable {
     }
 }
 
+/// Explicit Download fetches every mapped cloud file, including files the
+/// comparison found identical. Automatic synchronization still uses its normal
+/// change/conflict plan and does not repeatedly fetch matching files.
+enum SteamCloudManualSelection {
+    static func entries(_ entries: [SteamCloudEntry], upload: Bool) -> [SteamCloudEntry] {
+        entries.filter { entry in
+            if upload {
+                return (entry.kind == .differ || entry.kind == .localOnly) && !entry.localSHA.isEmpty
+            }
+            return entry.kind == .same || entry.kind == .differ || entry.kind == .cloudOnly
+        }
+    }
+}
+
 // MARK: - The record of the last sync
 
 /// What PocketGamesNoJ knows about one game's saves since its last sync with Steam Cloud. Kept per
@@ -316,6 +330,37 @@ struct SteamCloudRecord: Codable, Equatable, Sendable {
     /// the same reason.
     var steamID: UInt64?
     var buildID: UInt32?
+    /// Explicitly chosen for this game/account only. Old records retain the
+    /// existing automatic selection until the user changes it.
+    var saveProfileName: String?
+    /// A baseline from another directory cannot authorize an automatic upload.
+    /// Cleared only after a confirmed manual transfer succeeds in the new one.
+    var profileChoicePending: Bool?
+
+    mutating func selectSaveProfile(_ name: String) {
+        saveProfileName = name
+        profileChoicePending = true
+        files.removeAll()
+        changeNumber = 0
+        lastSync = nil
+        unsyncedStart = true
+        problem = nil
+    }
+
+    /// Preserve any explicit selection, including build 14's successful choice.
+    /// A genuinely empty first setup may sync normally. Existing progress or a
+    /// baseline from the old automatic directory requires a confirmed transfer.
+    @discardableResult
+    mutating func adoptDefaultSaveProfile(_ name: String, hasLocalSaves: Bool) -> Bool {
+        guard saveProfileName == nil else { return false }
+        if hasLocalSaves || !files.isEmpty || changeNumber != 0 || lastSync != nil
+            || unsyncedStart || sessionOpen || profileChoicePending == true {
+            selectSaveProfile(name)
+        } else {
+            saveProfileName = name
+        }
+        return true
+    }
 
     /// Whether a listing looks like a cloud that lost track of this game rather than its real
     /// state: no files at all although saves were synced before, or a change number that went
@@ -356,6 +401,7 @@ struct SteamCloudConflict: Equatable, Sendable, Identifiable {
 /// only (copied without asking) and which need the user's choice. Never deletes anything on
 /// either side: a file gone from one side is either restored from the other or left as it is.
 struct SteamCloudPlan: Equatable, Sendable {
+    var needsProfileChoice = false
     var download: [SteamCloudEntry] = []
     var upload: [SteamCloudEntry] = []
     var conflicts: [SteamCloudConflict] = []
@@ -365,10 +411,14 @@ struct SteamCloudPlan: Equatable, Sendable {
     /// not sent back.
     var droppedInCloud: [SteamCloudEntry] = []
 
-    var isClear: Bool { download.isEmpty && upload.isEmpty && conflicts.isEmpty }
+    var isClear: Bool { !needsProfileChoice && download.isEmpty && upload.isEmpty && conflicts.isEmpty }
 
     static func make(audit: SteamCloudAudit, record: SteamCloudRecord) -> SteamCloudPlan {
         var plan = SteamCloudPlan()
+        if record.profileChoicePending == true {
+            plan.needsProfileChoice = true
+            return plan
+        }
         let hex = SteamCloudRecord.hex
         // The cloud moved since the last complete sync (or there never was one).
         let cloudMoved = record.changeNumber == 0 || audit.changeNumber != record.changeNumber
@@ -438,24 +488,17 @@ struct SteamCloudPlan: Equatable, Sendable {
 
 // MARK: - Backups
 
-/// Which save backups may be removed. Backups are folders named by their time
-/// (Documents/save-backups/<App ID>/<time>); every one younger than `keepDays` stays, and so do
-/// the newest `keepNewest`, whatever their age. Beyond that only the oldest go, down to `keepMax`.
+/// Keep five completed backup sets per game, regardless of age. A newly
+/// completed backup is protected even if the device clock moved backward.
 enum SteamCloudBackupRetention {
-    static let keepNewest = 10
-    static let keepMax = 30
-    static let keepDays = 60.0
+    static let keepMax = 5
 
-    static func expired(_ backups: [(name: String, created: Date)], now: Date) -> [String] {
-        let newestFirst = backups.sorted { $0.created > $1.created }
-        guard newestFirst.count > keepMax else { return [] }
-        var excess = newestFirst.count - keepMax
-        var drop: [String] = []
-        for backup in newestFirst.dropFirst(keepNewest).reversed() where excess > 0 {
-            guard now.timeIntervalSince(backup.created) > keepDays * 86_400 else { continue }
-            drop.append(backup.name)
-            excess -= 1
+    static func expired(_ backups: [(name: String, created: Date)], keeping: String? = nil) -> [String] {
+        let newestFirst = backups.sorted {
+            if ($0.name == keeping) != ($1.name == keeping) { return $0.name == keeping }
+            if $0.created != $1.created { return $0.created > $1.created }
+            return $0.name > $1.name
         }
-        return drop
+        return newestFirst.dropFirst(keepMax).reversed().map(\.name)
     }
 }
