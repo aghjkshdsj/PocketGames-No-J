@@ -5,6 +5,20 @@ import Foundation
 /// copy must not make its directory look like evidence that the game uses it.
 /// No prefix registry, profile directory or save is modified by selection.
 enum SteamCloudProfiles {
+    /// Only the game/profile pair confirmed on-device. Explicit user choices
+    /// take precedence; other games keep their existing automatic behavior.
+    static func defaultName(appID: Int) -> String? {
+        appID == 2019300 ? "mythic" : nil
+    }
+
+    /// Detect pre-existing progress without reading save contents. Unknown
+    /// rules are treated conservatively until a manual transfer is confirmed.
+    static func hasLocalSaveFiles(paths: SteamCloudPaths, rules: [SteamCloudSaveRule]) -> Bool {
+        guard !rules.isEmpty else { return true }
+        return !SteamCloudAudit.run(listing: SteamCloudListing(), rules: rules, paths: paths,
+                                    sha1: { _ in nil }).entries.isEmpty
+    }
+
     static func names(drive: URL) -> [String] {
         let users = drive.appendingPathComponent("users", isDirectory: true)
         guard (try? users.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink != true,

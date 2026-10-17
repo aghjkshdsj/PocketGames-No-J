@@ -247,6 +247,32 @@ var differentDestination = paths
 differentDestination.userFolder = drive.appendingPathComponent("users/mythic", isDirectory: true)
 check(differentDestination != paths, "a confirmation for mobile cannot be reused for mythic even with the same filenames")
 
+check(SteamCloudProfiles.defaultName(appID: 2019300) == "mythic", "Dokimon defaults to the device-confirmed profile")
+check(SteamCloudProfiles.defaultName(appID: 751780) == nil, "Forager's existing automatic mapping is unchanged")
+var defaultFresh = SteamCloudRecord()
+check(defaultFresh.adoptDefaultSaveProfile("mythic", hasLocalSaves: false), "a clean setup adopts the default")
+check(defaultFresh.saveProfileName == "mythic" && defaultFresh.profileChoicePending != true,
+      "clean first setup can download cloud saves normally")
+var defaultLegacy = otherGame
+check(defaultLegacy.adoptDefaultSaveProfile("mythic", hasLocalSaves: false), "legacy automatic mapping adopts the default")
+check(defaultLegacy.files.isEmpty && defaultLegacy.profileChoicePending == true,
+      "legacy baseline is cleared and transfers are held before migration")
+check(plan(profileAudit, defaultLegacy, change: 7).upload.isEmpty, "legacy one-minute save cannot replace PC progress automatically")
+var defaultLocal = SteamCloudRecord()
+_ = defaultLocal.adoptDefaultSaveProfile("mythic", hasLocalSaves: true)
+check(defaultLocal.profileChoicePending == true, "even without a sync record, existing local progress requires confirmation")
+var confirmedProfile = defaultFresh
+confirmedProfile.files = [key("save.sav"): synced("PC 12 minutes")]
+confirmedProfile.changeNumber = 7
+let confirmedBefore = confirmedProfile
+check(!confirmedProfile.adoptDefaultSaveProfile("mythic", hasLocalSaves: true) && confirmedProfile == confirmedBefore,
+      "the successful build 14 selection and baseline are preserved without another hold")
+var customProfile = SteamCloudRecord()
+customProfile.saveProfileName = "mobile"
+let customBefore = customProfile
+check(!customProfile.adoptDefaultSaveProfile("mythic", hasLocalSaves: true) && customProfile == customBefore,
+      "an explicit alternative selection is not overridden by the default")
+
 let now = Date(timeIntervalSince1970: 2_000_000_000)
 func backups(_ ages: [Double]) -> [(name: String, created: Date)] {
     ages.enumerated().map { ("b\($0.offset)", now.addingTimeInterval(-$0.element * 86_400)) }

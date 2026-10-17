@@ -347,6 +347,21 @@ struct SteamCloudRecord: Codable, Equatable, Sendable {
         problem = nil
     }
 
+    /// Preserve any explicit selection, including build 14's successful choice.
+    /// A genuinely empty first setup may sync normally. Existing progress or a
+    /// baseline from the old automatic directory requires a confirmed transfer.
+    @discardableResult
+    mutating func adoptDefaultSaveProfile(_ name: String, hasLocalSaves: Bool) -> Bool {
+        guard saveProfileName == nil else { return false }
+        if hasLocalSaves || !files.isEmpty || changeNumber != 0 || lastSync != nil
+            || unsyncedStart || sessionOpen || profileChoicePending == true {
+            selectSaveProfile(name)
+        } else {
+            saveProfileName = name
+        }
+        return true
+    }
+
     /// Whether a listing looks like a cloud that lost track of this game rather than its real
     /// state: no files at all although saves were synced before, or a change number that went
     /// backwards. Nothing is uploaded on such an answer (an upload would then replace cloud files

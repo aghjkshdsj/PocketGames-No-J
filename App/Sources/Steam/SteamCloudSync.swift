@@ -434,6 +434,7 @@ final class SteamCloudSync: ObservableObject {
     }
 
     private static let noFolders = "This game's save folders were not found (it has not been installed or started yet)."
+    private static let profileChoiceRequired = "Save location changed. Confirm Download saves or Upload saves for this folder before automatic syncing resumes."
 
     /// Where the game's saves are, from Steam's product info (fetched online, kept in the record
     /// for offline use).
@@ -464,7 +465,7 @@ final class SteamCloudSync: ObservableObject {
             update(appID) { $0.steamID = steamID; $0.rules = rules; $0.overrides = overrides; $0.buildID = buildID }
         }
         let user: URL
-        if let chosen = record(appID).saveProfileName {
+        if let chosen = record(appID).saveProfileName ?? SteamCloudProfiles.defaultName(appID: appID) {
             guard let selected = SteamCloudProfiles.folder(named: chosen, drive: drive) else {
                 throw SteamFileError.invalid("The selected save location is unavailable. Choose an existing Windows user folder in Steam Cloud > Save location.")
             }
@@ -477,6 +478,12 @@ final class SteamCloudSync: ObservableObject {
         let remote = SteamDock.clientRoot.appendingPathComponent("userdata/\(steamID & 0xFFFF_FFFF)/\(appID)/remote", isDirectory: true)
         let paths = SteamCloudPaths(userFolder: user, installFolder: install, remoteFolder: remote,
                                     steamID: steamID, overrides: overrides ?? [])
+        if record(appID).saveProfileName == nil,
+           SteamCloudProfiles.defaultName(appID: appID) != nil {
+            let hasSaves = SteamCloudProfiles.hasLocalSaveFiles(paths: paths, rules: rules ?? [])
+            update(appID) { _ = $0.adoptDefaultSaveProfile(user.lastPathComponent, hasLocalSaves: hasSaves) }
+            SteamLog.event("[steam-cloud] app=\(appID) verified default save profile applied; manual-choice=\(record(appID).profileChoicePending == true ? 1 : 0)")
+        }
         return Context(paths: paths, rules: rules ?? [], buildID: buildID)
     }
 
@@ -591,7 +598,7 @@ final class SteamCloudSync: ObservableObject {
         guard !dockRunning else { return .failed("Valve's Steam client holds the account while the game runs; the saves sync when it ends.") }
         guard !busy.contains(appID), activeApp != appID else { return .failed("Steam Cloud is busy with this game.") }
         guard record(appID).profileChoicePending != true else {
-            let why = "Save location changed. Confirm Download saves or Upload saves for this folder before automatic syncing resumes."
+            let why = Self.profileChoiceRequired
             setPhase(appID, .failed(why))
             SteamLog.event("[steam-cloud] app=\(appID) automatic sync held for save-location choice")
             return .failed(why)
@@ -601,6 +608,11 @@ final class SteamCloudSync: ObservableObject {
         SteamLog.event("[steam-cloud] app=\(appID) sync (\(reason))")
         do {
             let context = try await context(appID, online: true)
+            // Context can adopt the default for a legacy record. Recheck after
+            // that migration, before any transfer can use the old baseline.
+            guard record(appID).profileChoicePending != true else {
+                throw SteamFileError.invalid(Self.profileChoiceRequired)
+            }
             var (list, _, plan) = try await compare(appID, context)
             var done: [String] = []
             if !plan.download.isEmpty {
@@ -615,7 +627,7 @@ final class SteamCloudSync: ObservableObject {
             // that does not list an upload yet shows it as still changed here (uploaded again
             // next time), never as changed in the cloud.
             if !done.isEmpty { (list, _, plan) = try await compare(appID, context) }
-            let clear = plan.conflicts.isEmpty && plan.download.isEmpty && plan.upload.isEmpty
+            let clear = plan.isClear
             update(appID) { r in
                 r.problem = nil
                 r.sessionOpen = false

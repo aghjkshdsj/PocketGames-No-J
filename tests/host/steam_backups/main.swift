@@ -155,6 +155,9 @@ func profilePaths(_ user: URL) -> SteamCloudPaths {
 }
 let mobilePaths = profilePaths(mobileProfile)
 let gamePaths = profilePaths(SteamCloudProfiles.folder(named: "mythic", drive: profileDrive)!)
+let dokimonRules = [SteamCloudSaveRule(root: "WinAppDataLocal", path: "dokimon/", pattern: "*.sav", recursive: false, platforms: ["windows"])]
+precondition(!SteamCloudProfiles.hasLocalSaveFiles(paths: gamePaths, rules: dokimonRules), "empty target allows a first automatic cloud download")
+precondition(SteamCloudProfiles.hasLocalSaveFiles(paths: gamePaths, rules: []), "unknown rules require a cautious manual choice")
 let cloudMainPath = "%WinAppDataLocal%dokimon/save.sav"
 let cloudWorldPath = "%WinAppDataLocal%dokimon/world_save.sav"
 let gameMain = gamePaths.url(cloudPath: cloudMainPath)!
@@ -165,6 +168,7 @@ let oldProgress = Data("phone progress 1 minute".utf8)
 let pcProgress = Data("PC progress 12 minutes".utf8)
 for url in [gameMain, mobileMain] { try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true) }
 try oldProgress.write(to: gameMain)
+precondition(SteamCloudProfiles.hasLocalSaveFiles(paths: gamePaths, rules: dokimonRules), "a pre-existing save triggers the migration hold")
 try pcProgress.write(to: mobileMain)
 try Data("volume setting".utf8).write(to: settings)
 var mainEntry = SteamCloudEntry(path: cloudMainPath, kind: .differ)
