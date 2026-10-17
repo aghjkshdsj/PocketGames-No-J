@@ -18,9 +18,6 @@ final class Settings: ObservableObject {
     /// Interpreter, run Windows games' x64 code with FXR (on by default since it can run every 64-bit
     /// game of a kept session, docs/FXR.md) instead of FXI. Read when a game starts.
     @Published var winFXR: Bool { didSet { d.set(winFXR, forKey: "winFXR") } }
-    /// Interpreter, keep the Wine session when a game ends, so the next game starts without
-    /// closing PocketGamesNoJ (experimental, docs/SESSION_REUSE.md). Read at launch (WineController).
-    @Published var sessionReuse: Bool { didSet { d.set(sessionReuse, forKey: "sessionReuse") } }
     /// How Steam games start: "ask" (a choice at every Play), "dock" (Steam Dock: Valve's own
     /// Steam client signs in and starts the game, for games that need Steam running) or "direct"
     /// (the game's program starts on its own: faster, DRM-free games).
@@ -46,7 +43,7 @@ final class Settings: ObservableObject {
     static func registerDefaults(_ d: UserDefaults) {
         // Defaults for interpreter execution and the game library.
         d.register(defaults: ["showHUD": true, "frameCap": 120,
-                              "useFXR": false, "muteGameAudio": false, "winFXR": true, "sessionReuse": false,
+                              "useFXR": false, "muteGameAudio": false, "winFXR": true,
                               "steamLaunchMode": "ask", "steamCloud": true, "controllerAPI": "xinput",
                               "gameHUD": false, "monitorHeight": 720, "touchPadMode": "auto", "touchPadHaptics": true])
     }
@@ -58,7 +55,6 @@ final class Settings: ObservableObject {
         useFXR = d.bool(forKey: "useFXR")
         muteGameAudio = d.bool(forKey: "muteGameAudio")
         winFXR = d.bool(forKey: "winFXR")
-        sessionReuse = d.bool(forKey: "sessionReuse")
         steamLaunchMode = d.string(forKey: "steamLaunchMode") ?? "ask"
         steamCloud = d.bool(forKey: "steamCloud")
         controllerAPI = d.string(forKey: "controllerAPI") ?? "xinput"
