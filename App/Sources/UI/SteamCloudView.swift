@@ -11,6 +11,7 @@ struct SteamCloudSection: View {
     @State private var backups: [SteamCloudBackup] = []
     @State private var restoring: SteamCloudBackup?
     @State private var deleting: SteamCloudBackup?
+    @State private var archiving: SteamCloudEntry?
     @State private var message: String?
     @State private var working = false
     @State private var showBackups = false
@@ -66,6 +67,11 @@ struct SteamCloudSection: View {
         .glassDialog(item: $restoring, title: { "Restore the backup of \(Self.date($0.created))?" }, message: { _ in "The saved copies go back where the game reads them. This iPhone's current copies are backed up first, so this can be undone. Then the usual sync runs: the restored saves go up to Steam Cloud unless the cloud changed meanwhile (then you choose), and the cloud's copies they replace are backed up too." }) { backup in
             [DialogButton(title: "Restore \(backup.files.count) file\(backup.files.count == 1 ? "" : "s")") {
                 run { message = await cloud.restore(appID, backup) }
+             }, .cancel()]
+        }
+        .glassDialog(item: $archiving, title: { "Move \($0.name) to backup?" }, message: { _ in "This file is only on this iPhone. It will be backed up, then removed from the game's active save folder. Steam Cloud files are unchanged. You can restore the file from Backups. The five-backup limit applies." }) { entry in
+            [DialogButton(title: "Move to backup") {
+                run { message = await cloud.archivePhoneOnly(appID, entry) }
              }, .cancel()]
         }
         .glassDialog(item: $deleting, title: { "Delete the backup of \(Self.date($0.created))?" }, message: { _ in "This permanently deletes this backup set. Your current game saves and Steam Cloud files are kept." }) { backup in
@@ -229,6 +235,14 @@ struct SteamCloudSection: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(e.name).font(.caption).lineLimit(1)
+                            if e.kind == .localOnly {
+                                Button("Move to backup…") { archiving = e }
+                                    .buttonStyle(.bordered)
+                                    .disabled(working || gameRunning || cloud.isBusy(appID))
+                                    .padFocus("cloud.archive.\(e.id)", radius: 10) {
+                                        if !(working || gameRunning || cloud.isBusy(appID)) { archiving = e }
+                                    }
+                            }
                             Text(Self.folder(e.path)).font(.caption2).foregroundStyle(Deck.dim).lineLimit(1)
                         }
                         Spacer()

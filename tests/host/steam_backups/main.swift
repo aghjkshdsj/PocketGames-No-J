@@ -80,4 +80,57 @@ do {
 } catch SteamCloudBackupError.invalidPath {}
 precondition(fm.fileExists(atPath: sentinel.path))
 precondition(SteamCloudBackups.list(480, root: backupRoot) == [other])
-print("Steam backup storage: five-set cap, completed publication, interrupted staging, deletion and path boundaries passed")
+// Dokimon: cloud save.sav/world_save.sav match, but a phone-only temporary
+// world remains active. Moving it aside must preserve all bytes in a completed
+// backup and leave the two matching saves (and a stand-in remote file) alone.
+let dokimon = temporary.appendingPathComponent("active/dokimon", isDirectory: true)
+try fm.createDirectory(at: dokimon, withIntermediateDirectories: true)
+let tempSave = dokimon.appendingPathComponent("world_temp_data.sav")
+let mainSave = dokimon.appendingPathComponent("save.sav")
+let worldSave = dokimon.appendingPathComponent("world_save.sav")
+let cloudSave = temporary.appendingPathComponent("remote-world.sav")
+let tempBytes = Data("old phone-only world".utf8)
+for url in [mainSave, worldSave, cloudSave] { try Data("PC progress".utf8).write(to: url) }
+try tempBytes.write(to: tempSave)
+let archived = try SteamCloudBackups.archiveLocalFile(app, url: tempSave,
+    cloudPath: "%WinAppDataLocal%dokimon/world_temp_data.sav", expectedSHA: SteamCloudTransfer.sha1(tempBytes), root: backupRoot)
+precondition(!fm.fileExists(atPath: tempSave.path), "only the explicitly selected active file is removed")
+let archive = SteamCloudBackups.list(app, root: backupRoot).first { $0.folder == archived }!
+precondition(archive.files.count == 1 && archive.files[0].side == "device")
+precondition(archive.files[0].cloudPath == "%WinAppDataLocal%dokimon/world_temp_data.sav")
+let stored = SteamCloudBackups.folder(app, root: backupRoot).appendingPathComponent(archived).appendingPathComponent(archive.files[0].stored)
+let storedBytes = try Data(contentsOf: stored)
+precondition(storedBytes == tempBytes, "all old progress must remain restorable")
+for url in [mainSave, worldSave, cloudSave] {
+    let bytes = try Data(contentsOf: url)
+    precondition(bytes == Data("PC progress".utf8), "matching saves and remote data must stay unchanged")
+}
+precondition(SteamCloudBackups.list(app, root: backupRoot).count == 5)
+// A changed selection and a failed backup must both leave the active save intact.
+try tempBytes.write(to: tempSave)
+let beforeFailure = SteamCloudBackups.list(app, root: backupRoot)
+do {
+    try SteamCloudBackups.archiveLocalFile(app, url: tempSave,
+        cloudPath: "%WinAppDataLocal%dokimon/world_temp_data.sav", expectedSHA: Data([0]), root: backupRoot)
+    fatalError("A changed save must not be moved")
+} catch SteamCloudBackupError.changedSave {}
+precondition(SteamCloudBackups.list(app, root: backupRoot) == beforeFailure)
+let invalidRoot = temporary.appendingPathComponent("backup-root-is-a-file")
+try Data("blocked".utf8).write(to: invalidRoot)
+do {
+    try SteamCloudBackups.archiveLocalFile(app, url: tempSave,
+        cloudPath: "%WinAppDataLocal%dokimon/world_temp_data.sav", expectedSHA: SteamCloudTransfer.sha1(tempBytes), root: invalidRoot)
+    fatalError("A failed backup must stop the removal")
+} catch {}
+let activeAfterFailure = try Data(contentsOf: tempSave)
+precondition(activeAfterFailure == tempBytes)
+let linkedSave = dokimon.appendingPathComponent("linked.sav")
+try fm.createSymbolicLink(at: linkedSave, withDestinationURL: tempSave)
+do {
+    try SteamCloudBackups.archiveLocalFile(app, url: linkedSave,
+        cloudPath: "%WinAppDataLocal%dokimon/linked.sav", expectedSHA: SteamCloudTransfer.sha1(tempBytes), root: backupRoot)
+    fatalError("A linked active save must not be removed")
+} catch SteamCloudBackupError.changedSave {}
+precondition(fm.fileExists(atPath: linkedSave.path) && fm.fileExists(atPath: tempSave.path))
+precondition(SteamCloudBackups.list(480, root: backupRoot) == [other])
+print("Steam backup storage: five-set cap, completed publication, interrupted staging, deletion, phone-only archive and path boundaries passed")

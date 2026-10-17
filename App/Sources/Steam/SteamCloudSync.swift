@@ -13,7 +13,8 @@
 // batch), backups go to Documents/save-backups/<App ID>/<time> with a manifest that Restore
 // uses, a request Steam answered with an error never reads as an empty cloud, and the start and
 // end of a game session are recorded so a session that started unsynced never overwrites the
-// cloud unasked. Log tag [steam-cloud]: App IDs, counts and results; no account data or paths.
+// cloud unasked. [steam-cloud] records counts and results; [steam-cloud-file] adds
+// save names and relative Windows destinations, with account components redacted.
 
 import Compression
 import CryptoKit
@@ -534,6 +535,20 @@ final class SteamCloudSync: ObservableObject {
         games[appID] = state
         let roots = Set(rules.map(\.root)).sorted().joined(separator: ",")
         SteamLog.event("[steam-cloud] app=\(appID) \(audit.summary) rules=\(rules.count) roots=\(roots.isEmpty ? "-" : roots) | plan download=\(plan.download.count) upload=\(plan.upload.count) ask=\(plan.conflicts.count) dropped-in-cloud=\(plan.droppedInCloud.count) unsynced-start=\(record(appID).unsyncedStart ? 1 : 0)")
+        // Log save mapping, not contents or authentication data. Relative Windows
+        // locations avoid container UUIDs; redact account components in remote paths.
+        let drive = SteamLibrary.drive.standardizedFileURL.path + "/"
+        for entry in audit.entries.prefix(100) {
+            guard let url = paths.url(cloudPath: entry.path) else { continue }
+            let local = url.standardizedFileURL.path
+            let relative = local.hasPrefix(drive) ? "C:/" + String(local.dropFirst(drive.count)) : url.lastPathComponent
+            func clean(_ text: String) -> String {
+                text.replacingOccurrences(of: String(paths.steamID), with: "{SteamID}")
+                    .replacingOccurrences(of: "(?<![0-9])\(paths.steamID & 0xFFFF_FFFF)(?![0-9])", with: "{account}", options: .regularExpression)
+                    .replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+            }
+            SteamLog.event("[steam-cloud-file] app=\(appID) state=\(entry.kind.rawValue) cloud=\(clean(entry.path)) local=\(clean(relative)) cloud-bytes=\(entry.cloudSize) local-bytes=\(entry.localSize)")
+        }
         return (list, audit, plan)
     }
 
@@ -964,6 +979,38 @@ final class SteamCloudSync: ObservableObject {
         busy.remove(appID)
         if account != nil { await sync(appID, reason: "after a restore") }
         return "Restored \(restored) file\(restored == 1 ? "" : "s")."
+    }
+
+    /// User-confirmed removal from the active save set, with a complete backup.
+    /// Recheck the cloud and local hash: a file that now exists in the cloud or
+    /// changed since the confirmation must not be moved. The follow-up is read-only.
+    func archivePhoneOnly(_ appID: Int, _ selection: SteamCloudEntry) async -> String {
+        guard Self.enabled, account != nil, !dockRunning, activeApp != appID, !busy.contains(appID) else {
+            return "Wait until the game and its sync have ended, and sign in to Steam."
+        }
+        busy.insert(appID)
+        var result: String
+        do {
+            let context = try await context(appID, online: true)
+            let (_, audit, _) = try await compare(appID, context)
+            guard selection.kind == .localOnly,
+                  let current = audit.entries.first(where: { $0.key == selection.key }),
+                  current.kind == .localOnly, current.localSHA == selection.localSHA,
+                  current.localSize == selection.localSize,
+                  let url = context.paths.url(cloudPath: current.path) else {
+                throw SteamCloudBackupError.changedSave
+            }
+            let folder = try SteamCloudBackups.archiveLocalFile(appID, url: url, cloudPath: current.path,
+                                                               expectedSHA: selection.localSHA)
+            SteamLog.event("[steam-cloud] app=\(appID) phone-only save archived; active copy removed, cloud unchanged")
+            result = "Moved \(current.name) to Backups (\(folder)). Its active copy was removed; Steam Cloud was not changed. You can restore it from Backups."
+        } catch {
+            SteamLog.event("[steam-cloud] app=\(appID) phone-only archive stopped reason=\(SteamSignIn.reason(error))")
+            result = "Not moved: \(SteamSignIn.message(error))"
+        }
+        busy.remove(appID)
+        await check(appID)
+        return result
     }
 
     // MARK: Upload or download on request

@@ -36,11 +36,12 @@ struct SteamCloudBackup: Codable, Identifiable, Equatable, Sendable {
 }
 
 enum SteamCloudBackupError: LocalizedError {
-    case invalidPath, missingBackup
+    case invalidPath, missingBackup, changedSave
     var errorDescription: String? {
         switch self {
         case .invalidPath: return "The backup location is invalid. No backup was deleted."
         case .missingBackup: return "That backup is no longer available."
+        case .changedSave: return "The save changed or is no longer a regular file. Check the files again before moving it."
         }
     }
 }
@@ -51,6 +52,34 @@ enum SteamCloudBackups {
     }
     static func folder(_ appID: Int, root: URL = SteamCloudBackups.root) -> URL {
         root.appendingPathComponent(String(appID), isDirectory: true)
+    }
+
+    /// An explicitly selected phone-only save can hide a cloud save (for example,
+    /// a game's temporary world file). Publish a complete, restorable backup before
+    /// removing its active copy. The caller must recheck that it is still phone-only.
+    /// No network or automatic synchronization is performed here.
+    @discardableResult
+    static func archiveLocalFile(_ appID: Int, url: URL, cloudPath: String,
+                                 expectedSHA: Data, root: URL = SteamCloudBackups.root) throws -> String {
+        func checkedBytes() throws -> Data {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true,
+                  !expectedSHA.isEmpty else { throw SteamCloudBackupError.changedSave }
+            let data = try Data(contentsOf: url)
+            guard SteamCloudTransfer.sha1(data) == expectedSHA else { throw SteamCloudBackupError.changedSave }
+            return data
+        }
+        let data = try checkedBytes()
+        let time = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate?.timeIntervalSince1970 ?? 0
+        let backup = Writer(appID: appID, reason: "moved phone-only save out of active folder", root: root)
+        try backup.add(data, cloudPath: cloudPath, side: "device", time: UInt64(max(0, time)))
+        try backup.finish()
+        guard let folderName = backup.folderName else { throw SteamCloudBackupError.invalidPath }
+        // Files can be edited from Files even while the game is stopped. A changed
+        // file stays active; the backup of the original selection remains available.
+        _ = try checkedBytes()
+        try FileManager.default.removeItem(at: url)
+        return folderName
     }
 
     /// Deletion and publication stay inside one game's backup directory, even
