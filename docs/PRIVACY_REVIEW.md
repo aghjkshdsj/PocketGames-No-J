@@ -40,6 +40,9 @@ any applicable platform exception from actual processing. Neither optional Steam
 use nor absence of a project backend proves that no data is collected by third
 parties. Do not select advertising/tracking purposes without evidence.
 
+Dan supplied officialpocketgame@gmail.com as the support and privacy contact.
+The policy and Privacy screen use it; verify mailbox delivery before publishing.
+
 The bundled policy describes current source behavior. Before publishing, confirm
 the seller identity, confidential support channel, retention handling for support
 requests and final list of service providers. Check the final generated privacy

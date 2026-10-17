@@ -23,6 +23,4 @@ Removing data
 You can remove games through the app's storage controls and manage accessible files and save backups in Files > On My iPhone > PocketGames No J. Deleting the app removes its local app data, subject to device backups and Keychain behavior. Copies you exported or shared and data stored by Valve or other game services must be managed separately with their holders. This app does not create a separate PocketGames account.
 
 Questions and updates
-The current policy and project support are available at:
-https://github.com/aghjkshdsj/PocketGames-No-J
-For a privacy question, open a project issue without including private information. If confidential contact is needed, request a private contact method before sending details. Changes to this policy are published with the project and updated app. Before an App Store release, the publishing identity, support contact and App Store privacy disclosures must be checked against the submitted version.
+The current policy is available in Settings > About > Privacy. For support or privacy questions, contact officialpocketgame@gmail.com. Do not include passwords, authentication tokens or unnecessary personal information. Policy changes are included with updated versions of the app. Before an App Store release, the publishing identity, support contact, public privacy policy URL and App Store privacy disclosures must be checked against the submitted version.

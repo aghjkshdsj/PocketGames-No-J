@@ -16,8 +16,7 @@ struct PrivacyView: View {
                 Text("The privacy policy could not be loaded. Please reinstall a complete copy of the app.")
             }
             Link("Valve privacy policy", destination: URL(string: "https://store.steampowered.com/privacy_agreement/")!)
-            Link("Privacy policy online", destination: URL(string: "https://github.com/aghjkshdsj/PocketGames-No-J/blob/main/App/Resources/PrivacyPolicy.txt")!)
-            Link("Project support", destination: URL(string: "https://github.com/aghjkshdsj/PocketGames-No-J/issues")!)
+            Link("Support and privacy: officialpocketgame@gmail.com", destination: URL(string: "mailto:officialpocketgame@gmail.com")!)
         }
     }
 }
