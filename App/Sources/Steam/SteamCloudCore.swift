@@ -330,6 +330,22 @@ struct SteamCloudRecord: Codable, Equatable, Sendable {
     /// the same reason.
     var steamID: UInt64?
     var buildID: UInt32?
+    /// Explicitly chosen for this game/account only. Old records retain the
+    /// existing automatic selection until the user changes it.
+    var saveProfileName: String?
+    /// A baseline from another directory cannot authorize an automatic upload.
+    /// Cleared only after a confirmed manual transfer succeeds in the new one.
+    var profileChoicePending: Bool?
+
+    mutating func selectSaveProfile(_ name: String) {
+        saveProfileName = name
+        profileChoicePending = true
+        files.removeAll()
+        changeNumber = 0
+        lastSync = nil
+        unsyncedStart = true
+        problem = nil
+    }
 
     /// Whether a listing looks like a cloud that lost track of this game rather than its real
     /// state: no files at all although saves were synced before, or a change number that went
@@ -370,6 +386,7 @@ struct SteamCloudConflict: Equatable, Sendable, Identifiable {
 /// only (copied without asking) and which need the user's choice. Never deletes anything on
 /// either side: a file gone from one side is either restored from the other or left as it is.
 struct SteamCloudPlan: Equatable, Sendable {
+    var needsProfileChoice = false
     var download: [SteamCloudEntry] = []
     var upload: [SteamCloudEntry] = []
     var conflicts: [SteamCloudConflict] = []
@@ -379,10 +396,14 @@ struct SteamCloudPlan: Equatable, Sendable {
     /// not sent back.
     var droppedInCloud: [SteamCloudEntry] = []
 
-    var isClear: Bool { download.isEmpty && upload.isEmpty && conflicts.isEmpty }
+    var isClear: Bool { !needsProfileChoice && download.isEmpty && upload.isEmpty && conflicts.isEmpty }
 
     static func make(audit: SteamCloudAudit, record: SteamCloudRecord) -> SteamCloudPlan {
         var plan = SteamCloudPlan()
+        if record.profileChoicePending == true {
+            plan.needsProfileChoice = true
+            return plan
+        }
         let hex = SteamCloudRecord.hex
         // The cloud moved since the last complete sync (or there never was one).
         let cloudMoved = record.changeNumber == 0 || audit.changeNumber != record.changeNumber

@@ -222,6 +222,31 @@ check(upNames == Set(["local.sav", "changed.sav"]), "manual Upload retains its e
 
 // MARK: - Backups
 
+// A sync baseline established in mobile must never authorize uploading the
+// different one-minute save found after switching to the game's other profile.
+var switched = SteamCloudRecord()
+switched.files = [key("save.sav"): synced("PC 12 minutes")]
+switched.changeNumber = 7
+let otherGame = switched
+switched.selectSaveProfile("mythic")
+check(switched.saveProfileName == "mythic" && switched.profileChoicePending == true, "profile selection is pinned and requires a manual choice")
+check(switched.files.isEmpty && switched.changeNumber == 0, "old directory's baseline is invalidated")
+let profileAudit = [entry("save.sav", .differ, local: "phone 1 minute", cloud: "PC 12 minutes"),
+    entry("world_save.sav", .cloudOnly, cloud: "PC world"), entry("phone-only.sav", .localOnly, local: "old")]
+let held = plan(profileAudit, switched, change: 7)
+check(held.needsProfileChoice && !held.isClear && held.upload.isEmpty && held.download.isEmpty,
+      "new profile cannot automatically upload, download or claim it is in sync")
+check(SteamCloudManualSelection.entries(profileAudit, upload: false).count == 2, "explicit Download still selects PC copies for the new profile")
+check(otherGame.files.count == 1 && otherGame.profileChoicePending == nil, "another game's record is unchanged")
+let pinnedRoundTrip = try! JSONDecoder().decode(SteamCloudRecord.self, from: JSONEncoder().encode(switched))
+check(pinnedRoundTrip == switched, "profile and pending choice survive app restart")
+let legacyData = try! JSONEncoder().encode(otherGame)
+let legacyRecord = try! JSONDecoder().decode(SteamCloudRecord.self, from: legacyData)
+check(legacyRecord.saveProfileName == nil && legacyRecord.profileChoicePending == nil, "legacy records retain automatic selection")
+var differentDestination = paths
+differentDestination.userFolder = drive.appendingPathComponent("users/mythic", isDirectory: true)
+check(differentDestination != paths, "a confirmation for mobile cannot be reused for mythic even with the same filenames")
+
 let now = Date(timeIntervalSince1970: 2_000_000_000)
 func backups(_ ages: [Double]) -> [(name: String, created: Date)] {
     ages.enumerated().map { ("b\($0.offset)", now.addingTimeInterval(-$0.element * 86_400)) }

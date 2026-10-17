@@ -133,4 +133,56 @@ do {
 } catch SteamCloudBackupError.changedSave {}
 precondition(fm.fileExists(atPath: linkedSave.path) && fm.fileExists(atPath: tempSave.path))
 precondition(SteamCloudBackups.list(480, root: backupRoot) == [other])
-print("Steam backup storage: five-set cap, completed publication, interrupted staging, deletion, phone-only archive and path boundaries passed")
+// Production download commit: two profiles, an old one-minute in-game save in
+// mythic, and PC cloud copies already under mobile. Selecting mythic and doing
+// an explicit download must replace only that game's selected files, preserve
+// the one-minute bytes in a backup, and leave mobile and unrelated settings alone.
+let profileDrive = temporary.appendingPathComponent("profile-prefix/drive_c", isDirectory: true)
+let mobileProfile = profileDrive.appendingPathComponent("users/mobile", isDirectory: true)
+let gameProfile = profileDrive.appendingPathComponent("users/mythic", isDirectory: true)
+for dir in [mobileProfile, gameProfile, profileDrive.appendingPathComponent("users/Public", isDirectory: true)] {
+    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+}
+precondition(Set(SteamCloudProfiles.names(drive: profileDrive)) == Set(["mobile", "mythic"]))
+precondition(SteamCloudProfiles.folder(named: "MYTHIC", drive: profileDrive)?.path == gameProfile.path)
+for name in ["..", "Public", "../mythic", "mythic/x", "mythic\\x", "C:mythic", "missing"] {
+    precondition(SteamCloudProfiles.folder(named: name, drive: profileDrive) == nil)
+}
+try fm.createSymbolicLink(at: profileDrive.appendingPathComponent("users/linked"), withDestinationURL: outside)
+precondition(SteamCloudProfiles.folder(named: "linked", drive: profileDrive) == nil)
+func profilePaths(_ user: URL) -> SteamCloudPaths {
+    .init(userFolder: user, installFolder: temporary, remoteFolder: temporary, steamID: 76561197960265851, overrides: [])
+}
+let mobilePaths = profilePaths(mobileProfile)
+let gamePaths = profilePaths(SteamCloudProfiles.folder(named: "mythic", drive: profileDrive)!)
+let cloudMainPath = "%WinAppDataLocal%dokimon/save.sav"
+let cloudWorldPath = "%WinAppDataLocal%dokimon/world_save.sav"
+let gameMain = gamePaths.url(cloudPath: cloudMainPath)!
+let gameWorld = gamePaths.url(cloudPath: cloudWorldPath)!
+let mobileMain = mobilePaths.url(cloudPath: cloudMainPath)!
+let settings = gameMain.deletingLastPathComponent().appendingPathComponent("volume.ini")
+let oldProgress = Data("phone progress 1 minute".utf8)
+let pcProgress = Data("PC progress 12 minutes".utf8)
+for url in [gameMain, mobileMain] { try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true) }
+try oldProgress.write(to: gameMain)
+try pcProgress.write(to: mobileMain)
+try Data("volume setting".utf8).write(to: settings)
+var mainEntry = SteamCloudEntry(path: cloudMainPath, kind: .differ)
+mainEntry.cloudTime = 1_700_000_000
+let copied = try SteamCloudBackups.installDownloadedFiles(app, files: [
+    (mainEntry, gameMain, pcProgress),
+    (SteamCloudEntry(path: cloudWorldPath, kind: .cloudOnly), gameWorld, Data("PC world".utf8))
+], reason: "before a manual download", root: backupRoot)
+precondition(copied == 1)
+let gameMainBytes = try Data(contentsOf: gameMain)
+let mobileMainBytes = try Data(contentsOf: mobileMain)
+let worldBytes = try Data(contentsOf: gameWorld)
+let settingBytes = try Data(contentsOf: settings)
+precondition(gameMainBytes == pcProgress && mobileMainBytes == pcProgress && worldBytes == Data("PC world".utf8))
+precondition(settingBytes == Data("volume setting".utf8))
+let beforeDownload = SteamCloudBackups.list(app, root: backupRoot).first { $0.reason == "before a manual download" }!
+let preserved = SteamCloudBackups.folder(app, root: backupRoot).appendingPathComponent(beforeDownload.folder).appendingPathComponent(beforeDownload.files[0].stored)
+let preservedProgress = try Data(contentsOf: preserved)
+precondition(preservedProgress == oldProgress, "the one-minute progress remains restorable after downloading the PC progress")
+precondition(SteamCloudBackups.list(480, root: backupRoot) == [other])
+print("Steam backup storage: five-set cap, staging, deletion, phone-only archive, profile-specific download backup and path boundaries passed")

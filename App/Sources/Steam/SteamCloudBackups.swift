@@ -54,6 +54,28 @@ enum SteamCloudBackups {
         root.appendingPathComponent(String(appID), isDirectory: true)
     }
 
+    /// Commit already fetched and verified cloud bytes to their selected profile.
+    /// Complete every local backup before replacing any active copy.
+    static func installDownloadedFiles(_ appID: Int,
+        files: [(entry: SteamCloudEntry, url: URL, data: Data)], reason: String,
+        root: URL = SteamCloudBackups.root) throws -> Int {
+        let backup = Writer(appID: appID, reason: reason, root: root)
+        for item in files where FileManager.default.fileExists(atPath: item.url.path) {
+            let current = try Data(contentsOf: item.url)
+            let time = (try? item.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate?.timeIntervalSince1970 ?? 0
+            try backup.add(current, cloudPath: item.entry.path, side: "device", time: UInt64(max(0, time)))
+        }
+        try backup.finish()
+        for item in files {
+            try FileManager.default.createDirectory(at: item.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try item.data.write(to: item.url, options: .atomic)
+            if item.entry.cloudTime > 0 {
+                try? FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: TimeInterval(item.entry.cloudTime))], ofItemAtPath: item.url.path)
+            }
+        }
+        return backup.files.count
+    }
+
     /// An explicitly selected phone-only save can hide a cloud save (for example,
     /// a game's temporary world file). Publish a complete, restorable backup before
     /// removing its active copy. The caller must recheck that it is still phone-only.

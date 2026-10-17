@@ -21,9 +21,9 @@ swiftc --version | head -1
 swiftc -parse-as-library -O -o "$OUT/steam-auth-tests" "$ROOT/App/Sources/Steam/SwiftSteam/Auth/SteamAuthNetwork.swift" "$HERE/steam_auth/main.swift"
 "$OUT/steam-auth-tests" | tee "$OUT/steam-auth-tests.txt"
 # Steam Cloud saves: path mapping, comparison, sync decisions, backup retention.
-swiftc -O -o "$OUT/steam-cloud-tests" "$ROOT/App/Sources/Steam/SteamCloudCore.swift" "$HERE/steam_cloud/main.swift"
+swiftc -O -o "$OUT/steam-cloud-tests" "$ROOT/App/Sources/Steam/SteamCloudCore.swift" "$ROOT/App/Sources/Steam/SteamCloudProfiles.swift" "$HERE/steam_cloud/main.swift"
 "$OUT/steam-cloud-tests" | tee "$OUT/steam-cloud-tests.txt"
-swiftc -O -o "$OUT/steam-backup-tests" "$ROOT/App/Sources/Steam/SteamCloudCore.swift" "$ROOT/App/Sources/Steam/SteamCloudBackups.swift" "$HERE/steam_backups/main.swift"
+swiftc -O -o "$OUT/steam-backup-tests" "$ROOT/App/Sources/Steam/SteamCloudCore.swift" "$ROOT/App/Sources/Steam/SteamCloudProfiles.swift" "$ROOT/App/Sources/Steam/SteamCloudBackups.swift" "$HERE/steam_backups/main.swift"
 "$OUT/steam-backup-tests" | tee "$OUT/steam-backup-tests.txt"
 # DanPort Dock: Steam's UDP/TCP server list for Valve's client, and the config.vdf edit.
 swiftc -O -o "$OUT/steam-cm-tests" "$ROOT/App/Sources/Steam/SteamCMList.swift" "$HERE/steam_cm/main.swift"

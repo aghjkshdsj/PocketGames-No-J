@@ -318,6 +318,7 @@ final class SteamCloudSync: ObservableObject {
         var checked: Date?
         /// What the last sync did, in words.
         var lastResult: String?
+        var saveProfileName: String?
     }
 
     @Published private(set) var games: [Int: GameState] = [:]
@@ -462,7 +463,16 @@ final class SteamCloudSync: ObservableObject {
             }
             update(appID) { $0.steamID = steamID; $0.rules = rules; $0.overrides = overrides; $0.buildID = buildID }
         }
-        guard let user = Self.userFolder(drive: drive, rules: rules ?? []) else { throw SteamFileError.invalid(Self.noFolders) }
+        let user: URL
+        if let chosen = record(appID).saveProfileName {
+            guard let selected = SteamCloudProfiles.folder(named: chosen, drive: drive) else {
+                throw SteamFileError.invalid("The selected save location is unavailable. Choose an existing Windows user folder in Steam Cloud > Save location.")
+            }
+            user = selected
+        } else {
+            guard let automatic = Self.userFolder(drive: drive, rules: rules ?? []) else { throw SteamFileError.invalid(Self.noFolders) }
+            user = automatic
+        }
         guard let steamID, steamID != 0 else { throw SteamFileError.invalid("Steam Cloud needs a connection to Steam first.") }
         let remote = SteamDock.clientRoot.appendingPathComponent("userdata/\(steamID & 0xFFFF_FFFF)/\(appID)/remote", isDirectory: true)
         let paths = SteamCloudPaths(userFolder: user, installFolder: install, remoteFolder: remote,
@@ -532,6 +542,7 @@ final class SteamCloudSync: ObservableObject {
         var state = games[appID] ?? GameState()
         state.audit = audit; state.conflicts = plan.conflicts; state.droppedInCloud = plan.droppedInCloud.count
         state.checked = Date()
+        state.saveProfileName = paths.userFolder.lastPathComponent
         games[appID] = state
         let roots = Set(rules.map(\.root)).sorted().joined(separator: ",")
         SteamLog.event("[steam-cloud] app=\(appID) \(audit.summary) rules=\(rules.count) roots=\(roots.isEmpty ? "-" : roots) | plan download=\(plan.download.count) upload=\(plan.upload.count) ask=\(plan.conflicts.count) dropped-in-cloud=\(plan.droppedInCloud.count) unsynced-start=\(record(appID).unsyncedStart ? 1 : 0)")
@@ -579,6 +590,12 @@ final class SteamCloudSync: ObservableObject {
         guard account != nil else { return .failed("Sign in to Steam to sync Steam Cloud saves.") }
         guard !dockRunning else { return .failed("Valve's Steam client holds the account while the game runs; the saves sync when it ends.") }
         guard !busy.contains(appID), activeApp != appID else { return .failed("Steam Cloud is busy with this game.") }
+        guard record(appID).profileChoicePending != true else {
+            let why = "Save location changed. Confirm Download saves or Upload saves for this folder before automatic syncing resumes."
+            setPhase(appID, .failed(why))
+            SteamLog.event("[steam-cloud] app=\(appID) automatic sync held for save-location choice")
+            return .failed(why)
+        }
         busy.insert(appID); defer { busy.remove(appID) }
         setPhase(appID, .checking)
         SteamLog.event("[steam-cloud] app=\(appID) sync (\(reason))")
@@ -650,27 +667,14 @@ final class SteamCloudSync: ObservableObject {
             fetched.append((entry, url, data))
             setPhase(appID, .downloading(done: fetched.count, of: wanted.count))
         }
-        // Back up every device file that will be replaced, before any is.
-        let backup = SteamCloudBackups.Writer(appID: appID, reason: reason)
-        for item in fetched where FileManager.default.fileExists(atPath: item.url.path) {
-            let current = try Data(contentsOf: item.url)
-            let time = (try? item.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate?.timeIntervalSince1970 ?? 0
-            try backup.add(current, cloudPath: item.entry.path, side: "device", time: UInt64(max(0, time)))
-        }
-        try backup.finish()
+        let backedUp = try SteamCloudBackups.installDownloadedFiles(appID, files: fetched, reason: reason)
         var settled: [String: SteamCloudRecord.FileState] = [:]
         for item in fetched {
-            try FileManager.default.createDirectory(at: item.url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try item.data.write(to: item.url, options: .atomic)
-            if item.entry.cloudTime > 0 {
-                try? FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: TimeInterval(item.entry.cloudTime))],
-                                                       ofItemAtPath: item.url.path)
-            }
             settled[item.entry.key] = .init(state: .synced, sha: SteamCloudRecord.hex(item.entry.cloudSHA),
                                             size: item.entry.cloudSize, time: item.entry.cloudTime)
         }
         update(appID) { r in for (k, v) in settled { r.files[k] = v } }
-        SteamLog.event("[steam-cloud] app=\(appID) downloaded files=\(fetched.count) backed-up=\(backup.files.count)")
+        SteamLog.event("[steam-cloud] app=\(appID) downloaded files=\(fetched.count) backed-up=\(backedUp)")
         return fetched.count
     }
 
@@ -1013,6 +1017,30 @@ final class SteamCloudSync: ObservableObject {
         return result
     }
 
+    /// Pin one game's cloud mapping without moving or modifying either profile.
+    /// Clear the old baseline and hold automatic transfers until a manual choice.
+    func selectSaveProfile(_ appID: Int, name: String) async -> String {
+        guard account != nil, !dockRunning, activeApp != appID, !busy.contains(appID) else {
+            return "Wait until the game and its sync have ended, and sign in to Steam."
+        }
+        guard let folder = SteamCloudProfiles.folder(named: name, drive: SteamLibrary.drive) else {
+            return "That Windows user folder is unavailable. No save location was changed."
+        }
+        let current = record(appID).saveProfileName ?? games[appID]?.saveProfileName
+            ?? Self.userFolder(drive: SteamLibrary.drive, rules: record(appID).rules ?? [])?.lastPathComponent
+        if current?.caseInsensitiveCompare(folder.lastPathComponent) == .orderedSame {
+            update(appID) { $0.saveProfileName = folder.lastPathComponent }
+            return "This game already uses that save location."
+        }
+        update(appID) { $0.selectSaveProfile(folder.lastPathComponent) }
+        var state = GameState()
+        state.saveProfileName = folder.lastPathComponent
+        games[appID] = state
+        SteamLog.event("[steam-cloud] app=\(appID) save-location changed; automatic transfers paused until confirmed manual transfer")
+        await check(appID)
+        return "Save location changed to \(folder.lastPathComponent). Choose Download saves to bring your PC progress into this folder. Existing saves are kept until you confirm replacement."
+    }
+
     // MARK: Upload or download on request
 
     /// What an explicit transfer would copy. Downloads include already identical
@@ -1024,6 +1052,8 @@ final class SteamCloudSync: ObservableObject {
         /// Keys of the entries whose other side changed since the last sync (or that were never
         /// synced): copying them replaces newer work there, which is backed up first.
         var replacesNewer: Set<String>
+        /// The confirmation belongs to this exact mapping, not just filenames.
+        var paths: SteamCloudPaths
         var id: String { "\(appID)-\(upload)" }
     }
 
@@ -1056,7 +1086,7 @@ final class SteamCloudSync: ObservableObject {
                 }
             }
             SteamLog.event("[steam-cloud] app=\(appID) manual \(verb) prepared files=\(entries.count) already-matching=\(entries.filter { $0.kind == .same }.count) replacing-newer=\(newer.count)")
-            return .success(ManualTransfer(appID: appID, upload: upload, entries: entries, replacesNewer: newer))
+            return .success(ManualTransfer(appID: appID, upload: upload, entries: entries, replacesNewer: newer, paths: context.paths))
         } catch {
             setPhase(appID, .failed(SteamSignIn.message(error)))
             SteamLog.event("[steam-cloud] app=\(appID) manual \(verb) prepare failed stage=\(stage) reason=\(SteamSignIn.reason(error))")
@@ -1080,6 +1110,9 @@ final class SteamCloudSync: ObservableObject {
         var message: String
         do {
             let context = try await context(appID, online: true)
+            guard context.paths == transfer.paths else {
+                throw SteamFileError.invalid("The save location changed since confirmation. Look again and confirm the transfer for this folder.")
+            }
             let (_, audit, _) = try await compare(appID, context)
             let now = Dictionary(audit.entries.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
             let same = transfer.entries.allSatisfy { e in
@@ -1090,6 +1123,7 @@ final class SteamCloudSync: ObservableObject {
             let n: Int
             if transfer.upload { n = try await upload(appID, transfer.entries, context) }
             else { n = try await download(appID, transfer.entries, context, reason: "before a manual download") }
+            update(appID) { $0.profileChoicePending = false; $0.problem = nil }
             message = transfer.upload ? "Uploaded \(n) save\(n == 1 ? "" : "s") to Steam Cloud." : "Downloaded \(n) save\(n == 1 ? "" : "s") from Steam Cloud."
             if transfer.entries.contains(where: { !(transfer.upload ? $0.cloudSHA : $0.localSHA).isEmpty }) {
                 message += " The copies they replaced are in save-backups."

@@ -64,6 +64,11 @@ These logs remain on-device unless shared by the user. They can distinguish a
 profile/location mismatch if moving aside the temporary file does not help.
 No profile remapping or copying across profiles is performed by this change.
 
+The later device test confirmed that archiving the temporary file did not
+resolve the missing progress. The user found a separate in-game save under
+another Windows profile. The explicit per-game folder selection and automatic
+transfer guard are documented in [Save location](STEAM_CLOUD_SAVE_LOCATION.md).
+
 Storage regression tests use the production archive operation on temporary
 files: the temporary world is archived with exact restorable bytes, the two
 cloud-matching saves and a remote-file stand-in remain unchanged, the five-set
