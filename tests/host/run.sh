@@ -16,6 +16,7 @@ python3 "$ROOT/tests/wow_window_bounds_test.py"
 python3 "$ROOT/tests/compliance_tools_test.py"
 python3 "$ROOT/tests/app_store_preparation_test.py"
 python3 "$ROOT/tests/runtime_frameworks_test.py"
+python3 "$ROOT/tests/latest_run_test.py"
 cc -std=c11 -Wall -Wextra -Werror -I"$ROOT/engine/pedylib" \
     "$HERE/runtime_frameworks/main.c" -o "$OUT/runtime-framework-tests"
 "$OUT/runtime-framework-tests"
