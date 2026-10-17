@@ -151,7 +151,7 @@ for name in ["..", "Public", "../mythic", "mythic/x", "mythic\\x", "C:mythic", "
 try fm.createSymbolicLink(at: profileDrive.appendingPathComponent("users/linked"), withDestinationURL: outside)
 precondition(SteamCloudProfiles.folder(named: "linked", drive: profileDrive) == nil)
 func profilePaths(_ user: URL) -> SteamCloudPaths {
-    .init(userFolder: user, installFolder: temporary, remoteFolder: temporary, steamID: 76561197960265851, overrides: [])
+    .init(userFolder: user, installFolder: temporary, remoteFolder: temporary.appendingPathComponent("profile-remote", isDirectory: true), steamID: 76561197960265851, overrides: [])
 }
 let mobilePaths = profilePaths(mobileProfile)
 let gamePaths = profilePaths(SteamCloudProfiles.folder(named: "mythic", drive: profileDrive)!)
